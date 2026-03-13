@@ -806,6 +806,12 @@ function resolveOne(result) {
       if (/mixdrop|mixdrp|mixdroop|m1xdrop/i.test(host)) {
         return resolveMixdrop(result, url);
       }
+      if (/filelions|vidhide/i.test(host)) {
+        return resolveFilelions(result, url);
+      }
+      if (/emturbovid|turbovidhls|turboviplay/i.test(host)) {
+        return resolveEmturbovid(result, url);
+      }
       if (/player\.cuevana3\.eu/i.test(host)) {
         return resolveCuevanaPlayer(result, url);
       }
@@ -842,6 +848,10 @@ function inferPlayerFromUrl(url) {
     return "Dropload";
   if (value.includes("mixdrop") || value.includes("mixdrp") || value.includes("mixdroop") || value.includes("m1xdrop"))
     return "Mixdrop";
+  if (value.includes("filelions") || value.includes("vidhide"))
+    return "FileLions";
+  if (value.includes("emturbovid") || value.includes("turbovidhls") || value.includes("turboviplay"))
+    return "Emturbovid";
   if (value.includes("dood") || value.includes("ds2play") || value.includes("vidply") || value.includes("doply"))
     return "DoodStream";
   if (value.includes("streamtape") || value.includes("streamta.pe") || value.includes("strcloud"))
@@ -872,6 +882,10 @@ function playerRank(player) {
       return 50;
     case "Mixdrop":
       return 40;
+    case "FileLions":
+      return 38;
+    case "Emturbovid":
+      return 36;
     case "DoodStream":
       return 30;
     case "Streamtape":
@@ -998,6 +1012,68 @@ function resolveMixdrop(result, url) {
       quality: "Auto",
       headers: streamHeaders,
       player: "Mixdrop"
+    })];
+  });
+}
+function resolveFilelions(result, url) {
+  return __async(this, null, function* () {
+    const headers = __spreadProps(__spreadValues({}, result.headers || {}), {
+      Referer: result.referer || "https://ww1.cuevana3.is/"
+    });
+    const page = yield fetchPage(url.href, { headers }).catch(() => null);
+    if (!(page == null ? void 0 : page.text)) {
+      console.log(`[WebstreamerLatino] FileLions miss: ${url.href}`);
+      return [];
+    }
+    const unpacked = unpackPacker(page.text);
+    const linksMatch = unpacked.match(/var\s+links\s*=\s*\{[^}]*"hls2"\s*:\s*"([^"]+)"/i) || unpacked.match(/"hls2"\s*:\s*"([^"]+)"/i) || unpacked.match(/file:\s*"(https?:\/\/[^"]+\.m3u8[^"]*)"/i);
+    if (!linksMatch) {
+      console.log(`[WebstreamerLatino] FileLions parse miss: ${url.href}`);
+      return [];
+    }
+    const playlistUrl = linksMatch[1].replace(/\\\//g, "/");
+    const title = import_cheerio_without_node_native2.default.load(unpacked)("meta[name=\"description\"]").attr("content") || result.title;
+    const streamHeaders = {
+      Referer: (page == null ? void 0 : page.url) || url.href,
+      Origin: new URL((page == null ? void 0 : page.url) || url.href).origin
+    };
+    return [buildStream(result, {
+      title,
+      url: playlistUrl,
+      quality: "Auto",
+      headers: streamHeaders,
+      player: "FileLions"
+    })];
+  });
+}
+function resolveEmturbovid(result, url) {
+  return __async(this, null, function* () {
+    const headers = __spreadProps(__spreadValues({}, result.headers || {}), {
+      Referer: result.referer || "https://tioplus.app/"
+    });
+    const page = yield fetchPage(url.href, { headers }).catch(() => null);
+    const html = page == null ? void 0 : page.text;
+    if (!html) {
+      console.log(`[WebstreamerLatino] Emturbovid miss: ${url.href}`);
+      return [];
+    }
+    const playlistMatch = html.match(/data-hash="([^"]+\.m3u8[^"]*)"/i) || html.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i);
+    if (!playlistMatch) {
+      console.log(`[WebstreamerLatino] Emturbovid parse miss: ${url.href}`);
+      return [];
+    }
+    const playlistUrl = playlistMatch[1].replace(/\\\//g, "/");
+    const title = import_cheerio_without_node_native2.default.load(html)("title").text().trim() || result.title;
+    const streamHeaders = {
+      Referer: (page == null ? void 0 : page.url) || url.href,
+      Origin: new URL((page == null ? void 0 : page.url) || url.href).origin
+    };
+    return [buildStream(result, {
+      title,
+      url: playlistUrl,
+      quality: "Auto",
+      headers: streamHeaders,
+      player: "Emturbovid"
     })];
   });
 }
