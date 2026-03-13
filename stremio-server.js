@@ -263,9 +263,22 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
 
             console.log(`[proxy] ${req.method} ${targetHost} -> ${resp.status} ${resp.headers['content-type'] || 'unknown'}`);
 
-            // copy status and headers
+            // copy status and headers, but drop hop-by-hop / body-size headers
+            // that become invalid once we rewrite playlist bodies.
             res.status(resp.status);
-            Object.entries(resp.headers).forEach(([k, v]) => res.setHeader(k, v));
+            Object.entries(resp.headers).forEach(([k, v]) => {
+                const key = String(k).toLowerCase();
+                if ([
+                    'content-length',
+                    'content-encoding',
+                    'transfer-encoding',
+                    'connection',
+                    'keep-alive',
+                ].includes(key)) {
+                    return;
+                }
+                res.setHeader(k, v);
+            });
 
             const contentType = (resp.headers['content-type'] || '').toLowerCase();
             const isPlaylist = contentType.includes('mpegurl') || targetUrl.endsWith('.m3u8');
@@ -309,7 +322,9 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
 
                         return toProxyUrl(trimmed);
                     }).join('\n');
-                    
+
+                    res.setHeader('content-type', resp.headers['content-type'] || 'application/vnd.apple.mpegurl');
+                    res.removeHeader('content-length');
                     res.send(rewritten);
                 });
             } else {
