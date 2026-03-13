@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const dns = require('dns').promises;
 const { addonBuilder } = require("stremio-addon-sdk");
 const axios = require("axios");
 const express = require('express'); // used later when attaching proxy route
@@ -55,6 +56,7 @@ console.log("Loaded providers:", providers.map(p => p.name));
 // for local testing) or localhost if necessary.
 let ADDON_BASE = ''; // populated later
 let LAST_HOST = '';    // updated by middleware for each incoming request
+const dnsReachabilityCache = new Map();
 
 function requestBase(req) {
     if (PUBLIC_ADDON_BASE) {
@@ -107,6 +109,66 @@ function normalizeProxyTarget(rawUrl, headers = {}) {
     }
 
     return rawUrl;
+}
+
+async function canResolveHost(hostname) {
+    if (!hostname) {
+        return false;
+    }
+
+    const now = Date.now();
+    const cached = dnsReachabilityCache.get(hostname);
+    if (cached && cached.expiresAt > now) {
+        return cached.ok;
+    }
+
+    try {
+        await dns.lookup(hostname);
+        dnsReachabilityCache.set(hostname, { ok: true, expiresAt: now + 5 * 60 * 1000 });
+        return true;
+    } catch (_error) {
+        dnsReachabilityCache.set(hostname, { ok: false, expiresAt: now + 60 * 1000 });
+        return false;
+    }
+}
+
+async function pruneDeadHlsVariants(playlistText, baseUrl) {
+    const lines = playlistText.split('\n');
+    const kept = [];
+
+    for (let i = 0; i < lines.length; i += 1) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        if (trimmed.startsWith('#EXT-X-STREAM-INF')) {
+            const nextLine = lines[i + 1] || '';
+            const nextTrimmed = nextLine.trim();
+            if (!nextTrimmed || nextTrimmed.startsWith('#')) {
+                kept.push(line);
+                continue;
+            }
+
+            let hostname = '';
+            try {
+                hostname = new URL(nextTrimmed, baseUrl).hostname;
+            } catch (_error) {
+                hostname = '';
+            }
+
+            if (!hostname || await canResolveHost(hostname)) {
+                kept.push(line, nextLine);
+            } else {
+                console.log(`[proxy] dropping unreachable HLS variant host ${hostname}`);
+            }
+
+            i += 1;
+            continue;
+        }
+
+        kept.push(line);
+    }
+
+    return kept.join('\n');
 }
 
 function streamPriority(stream) {
@@ -342,9 +404,12 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
             if (isPlaylist) {
                 let data = '';
                 resp.data.on('data', chunk => data += chunk.toString());
-                resp.data.on('end', () => {
+                resp.data.on('end', async () => {
                     // Get base URL for resolving relative paths
                     const baseUrl = targetUrl.substring(0, targetUrl.lastIndexOf('/') + 1);
+                    const sanitizedData = data.includes('#EXT-X-STREAM-INF')
+                        ? await pruneDeadHlsVariants(data, baseUrl)
+                        : data;
                     
                     const toAbsoluteUrl = (value) => {
                         if (value.startsWith('http://') || value.startsWith('https://')) {
@@ -368,7 +433,7 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
                     };
 
                     // rewrite playlist lines: segment URLs plus URI attributes inside HLS tags
-                    const rewritten = data.split('\n').map(line => {
+                    const rewritten = sanitizedData.split('\n').map(line => {
                         const trimmed = line.trim();
 
                         if (!trimmed) return line;
