@@ -267,11 +267,16 @@ async function extractCineCalidadPlayers(tmdb, pageUrl, season, episode) {
       return;
     }
 
+    const normalizedUrl = normalizePlayerUrl(rawUrl, pageUrl);
+    if (!normalizedUrl) {
+      return;
+    }
+
     results.push({
       source: 'Cinecalidad',
       ...languageMeta('mx'),
       title: buildTitle(tmdb, season, episode),
-      url: rawUrl.replace(/^(https:)?\/\//, 'https://'),
+      url: normalizedUrl,
       referer: pageUrl,
       headers: { Referer: pageUrl },
     });
@@ -515,6 +520,26 @@ async function findCineCalidadEpisodeUrl(seriesUrl, season, episode) {
     });
 
   return href ? new URL(href, SOURCE_BASES.cinecalidad).href : null;
+}
+
+function normalizePlayerUrl(rawUrl, baseUrl) {
+  if (!rawUrl) {
+    return null;
+  }
+
+  if (/^\/\//.test(rawUrl)) {
+    return `https:${rawUrl}`;
+  }
+
+  if (/^https?:\/\//i.test(rawUrl)) {
+    return rawUrl;
+  }
+
+  try {
+    return new URL(rawUrl, baseUrl || SOURCE_BASES.cinecalidad).href;
+  } catch (_error) {
+    return null;
+  }
 }
 
 async function searchTioPlusSeries(tmdb, season, episode) {

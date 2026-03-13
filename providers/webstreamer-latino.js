@@ -1,6 +1,6 @@
 /**
  * webstreamer-latino - Built from src/webstreamer-latino/
- * Generated: 2026-03-13T12:51:28.777Z
+ * Generated: 2026-03-13T12:57:37.667Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -556,11 +556,15 @@ function extractCineCalidadPlayers(tmdb, pageUrl, season, episode) {
       if (!rawUrl || /youtube\.com\/embed/i.test(rawUrl)) {
         return;
       }
+      const normalizedUrl = normalizePlayerUrl(rawUrl, pageUrl);
+      if (!normalizedUrl) {
+        return;
+      }
       results.push(__spreadProps(__spreadValues({
         source: "Cinecalidad"
       }, languageMeta("mx")), {
         title: buildTitle(tmdb, season, episode),
-        url: rawUrl.replace(/^(https:)?\/\//, "https://"),
+        url: normalizedUrl,
         referer: pageUrl,
         headers: { Referer: pageUrl }
       }));
@@ -769,6 +773,22 @@ function findCineCalidadEpisodeUrl(seriesUrl, season, episode) {
     });
     return href ? new URL(href, SOURCE_BASES.cinecalidad).href : null;
   });
+}
+function normalizePlayerUrl(rawUrl, baseUrl) {
+  if (!rawUrl) {
+    return null;
+  }
+  if (/^\/\//.test(rawUrl)) {
+    return `https:${rawUrl}`;
+  }
+  if (/^https?:\/\//i.test(rawUrl)) {
+    return rawUrl;
+  }
+  try {
+    return new URL(rawUrl, baseUrl || SOURCE_BASES.cinecalidad).href;
+  } catch (_error) {
+    return null;
+  }
 }
 function searchTioPlusSeries(tmdb, season, episode) {
   return __async(this, null, function* () {
