@@ -30,7 +30,7 @@ export async function getLatinoSourceResults(tmdb, mediaType, season, episode) {
   const tasks = [
     searchCuevana(tmdb, season, episode),
     searchCineHdPlus(tmdb, mediaType, season, episode),
-    searchCineCalidad(tmdb, mediaType),
+    searchCineCalidad(tmdb, mediaType, season, episode),
     searchHomeCine(tmdb, season, episode),
     searchVerHdLink(tmdb, mediaType),
     searchTioPlus(tmdb, mediaType, season, episode),
@@ -202,26 +202,59 @@ async function searchCineHdPlus(tmdb, mediaType, season, episode) {
   return results;
 }
 
-async function searchCineCalidad(tmdb, mediaType) {
+async function searchCineCalidad(tmdb, mediaType, season, episode) {
+  if (mediaType === 'tv' && season && episode) {
+    return searchCineCalidadSeries(tmdb, season, episode);
+  }
+
   if (mediaType !== 'movie') {
     return [];
   }
 
-  const candidates = [tmdb.title, tmdb.originalTitle].filter(Boolean);
-  let pageUrl = null;
-
-  for (const candidate of candidates) {
-    const resultUrl = await findCineCalidadMovie(candidate, tmdb.year);
-    if (resultUrl) {
-      pageUrl = resultUrl;
-      break;
-    }
-  }
+  const pageUrl = await findCineCalidadPage(
+    [tmdb.title, tmdb.originalTitle].filter(Boolean),
+    findCineCalidadMovie,
+    tmdb.year
+  );
 
   if (!pageUrl) {
     return [];
   }
 
+  return extractCineCalidadPlayers(tmdb, pageUrl);
+}
+
+async function searchCineCalidadSeries(tmdb, season, episode) {
+  const seriesUrl = await findCineCalidadPage(
+    [tmdb.title, tmdb.originalTitle].filter(Boolean),
+    findCineCalidadSeries,
+    tmdb.year
+  );
+
+  if (!seriesUrl) {
+    return [];
+  }
+
+  const episodeUrl = await findCineCalidadEpisodeUrl(seriesUrl, season, episode);
+  if (!episodeUrl) {
+    return [];
+  }
+
+  return extractCineCalidadPlayers(tmdb, episodeUrl, season, episode);
+}
+
+async function findCineCalidadPage(candidates, finder, year) {
+  for (const candidate of candidates) {
+    const resultUrl = await finder(candidate, year);
+    if (resultUrl) {
+      return resultUrl;
+    }
+  }
+
+  return null;
+}
+
+async function extractCineCalidadPlayers(tmdb, pageUrl, season, episode) {
   const html = await fetchText(pageUrl, {
     headers: { Referer: SOURCE_BASES.cinecalidad },
   });
@@ -237,7 +270,7 @@ async function searchCineCalidad(tmdb, mediaType) {
     results.push({
       source: 'Cinecalidad',
       ...languageMeta('mx'),
-      title: buildTitle(tmdb),
+      title: buildTitle(tmdb, season, episode),
       url: rawUrl.replace(/^(https:)?\/\//, 'https://'),
       referer: pageUrl,
       headers: { Referer: pageUrl },
@@ -418,6 +451,70 @@ async function findCineCalidadMovie(title, year) {
   });
 
   return best && best.score >= 5 ? best.href : null;
+}
+
+async function findCineCalidadSeries(title, year) {
+  const searchUrl = `${SOURCE_BASES.cinecalidad}/?s=${encodeURIComponent(title)}`;
+  const html = await fetchText(searchUrl, {
+    headers: { Referer: SOURCE_BASES.cinecalidad },
+  });
+  const $ = cheerio.load(html);
+  const targetNorm = normalizeTitle(title);
+  let best = null;
+
+  $('#archive-content article.item, #archive-content article').each((_, el) => {
+    const href = $(el).find('a[href*="/ver-serie/"]').first().attr('href');
+    const rawTitle = $(el).find('.in_title, .title, h2, h3').first().text().trim();
+    if (!href || !rawTitle) {
+      return;
+    }
+
+    let score = 0;
+    const norm = normalizeTitle(rawTitle);
+    if (norm === targetNorm) {
+      score += 10;
+    }
+    if (norm.includes(targetNorm) || targetNorm.includes(norm)) {
+      score += 5;
+    }
+
+    const yearText = $(el).find('.home_post_content p').eq(1).text().trim();
+    if (year && yearText === year) {
+      score += 4;
+    }
+
+    if (!best || score > best.score) {
+      best = { href, score };
+    }
+  });
+
+  return best && best.score >= 5 ? best.href : null;
+}
+
+async function findCineCalidadEpisodeUrl(seriesUrl, season, episode) {
+  const html = await fetchText(seriesUrl, {
+    headers: { Referer: SOURCE_BASES.cinecalidad },
+  });
+  const $ = cheerio.load(html);
+  const target = `${season}x${episode}`;
+
+  const href = $('a[href*="/ver-el-episodio/"]')
+    .map((_, el) => $(el).attr('href'))
+    .get()
+    .find((value) => {
+      if (!value) {
+        return false;
+      }
+
+      try {
+        const pathname = new URL(value, SOURCE_BASES.cinecalidad).pathname.toLowerCase();
+        return pathname.endsWith(`-${target}/`) || pathname.endsWith(`-${target}`);
+      } catch (_error) {
+        return false;
+      }
+    });
+
+  return href ? new URL(href, SOURCE_BASES.cinecalidad).href : null;
 }
 
 async function searchTioPlusSeries(tmdb, season, episode) {

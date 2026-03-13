@@ -133,6 +133,10 @@ async function resolveOne(result) {
       return resolveStreamEmbed(result, url);
     }
 
+    if (/vimeos/i.test(host)) {
+      return resolveVimeos(result, url);
+    }
+
     if (/vidsrc|vsrc/i.test(host)) {
       return resolveVidSrc(result, url);
     }
@@ -158,6 +162,7 @@ function inferPlayerFromUrl(url) {
   if (value.includes('waaw') || value.includes('vidora')) return 'Vidora';
   if (value.includes('strp2p') || value.includes('4meplayer') || value.includes('upns.pro') || value.includes('p2pplay')) return 'StrP2P';
   if (value.includes('gxplayer') || value.includes('bullstream') || value.includes('mp4player')) return 'StreamEmbed';
+  if (value.includes('vimeos')) return 'Vimeos';
   if (value.includes('vidsrc') || value.includes('vsrc')) return 'VidSrc';
 
   try {
@@ -179,6 +184,8 @@ function playerRank(player) {
       return 55;
     case 'StreamEmbed':
       return 50;
+    case 'Vimeos':
+      return 48;
     case 'Mixdrop':
       return 40;
     case 'FileLions':
@@ -700,6 +707,42 @@ async function resolveStreamEmbed(result, url) {
     url: playlistUrl,
     quality: qualityList[0] ? `${qualityList[0]}p` : 'Auto',
     player: 'StreamEmbed',
+  })];
+}
+
+async function resolveVimeos(result, url) {
+  const headers = {
+    ...(result.headers || {}),
+    Referer: result.referer || url.href,
+  };
+  const html = await fetchText(url.href, { headers }).catch(() => null);
+  if (!html) {
+    console.log(`[WebstreamerLatino] Vimeos miss: ${url.href}`);
+    return [];
+  }
+
+  const unpacked = unpackPacker(html) || '';
+  const body = `${html}\n${unpacked}`;
+  const fileMatch =
+    body.match(/sources:\s*\[\{file:"([^"]+\.m3u8[^"]*)"/i) ||
+    body.match(/sources:\s*\[\{file:'([^']+\.m3u8[^']*)'/i) ||
+    body.match(/https?:\/\/[^"'`\s]+\.m3u8[^"'`\s]*/i);
+
+  if (!fileMatch) {
+    console.log(`[WebstreamerLatino] Vimeos parse miss: ${url.href}`);
+    return [];
+  }
+
+  const playlistUrl = (fileMatch[1] || fileMatch[0]).replace(/\\\//g, '/');
+  const posterMatch = body.match(/image:"([^"]+)"/i);
+  const height = await guessHeightFromPlaylist(playlistUrl, { Referer: url.href }).catch(() => null);
+
+  return [buildStream(result, {
+    title: posterMatch ? result.title : result.title,
+    url: playlistUrl,
+    quality: height ? `${height}p` : 'Auto',
+    headers: { Referer: url.href },
+    player: 'Vimeos',
   })];
 }
 
