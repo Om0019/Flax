@@ -1,6 +1,6 @@
 /**
  * webstreamer-latino - Built from src/webstreamer-latino/
- * Generated: 2026-03-13T05:44:08.647Z
+ * Generated: 2026-03-13T06:27:31.255Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -94,22 +94,89 @@ var SOURCE_BASES = {
 
 // src/webstreamer-latino/http.js
 var import_axios = __toESM(require("axios"));
+var cookieJar = /* @__PURE__ */ new Map();
 function mergeHeaders(headers) {
   return __spreadValues(__spreadValues({}, DEFAULT_HEADERS), headers || {});
 }
-function fetchPage(_0) {
+function getCookieHeader(url) {
+  const hostname = new URL(url).hostname;
+  return cookieJar.get(hostname) || "";
+}
+function storeCookies(url, response) {
+  var _a;
+  const hostname = new URL(url).hostname;
+  const existing = cookieJar.get(hostname) || "";
+  const cookieMap = /* @__PURE__ */ new Map();
+  if (existing) {
+    existing.split(/;\s*/).forEach((pair) => {
+      const [name, ...rest] = pair.split("=");
+      if (!name || !rest.length) {
+        return;
+      }
+      cookieMap.set(name.trim(), rest.join("=").trim());
+    });
+  }
+  const setCookie = (_a = response.headers) == null ? void 0 : _a["set-cookie"];
+  const cookies = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
+  cookies.forEach((cookie) => {
+    const pair = String(cookie).split(";")[0];
+    const [name, ...rest] = pair.split("=");
+    if (!name || !rest.length) {
+      return;
+    }
+    cookieMap.set(name.trim(), rest.join("=").trim());
+  });
+  if (cookieMap.size > 0) {
+    cookieJar.set(
+      hostname,
+      Array.from(cookieMap.entries()).map(([name, value]) => `${name}=${value}`).join("; ")
+    );
+  }
+}
+function issueRequest(_0) {
   return __async(this, arguments, function* (url, options = {}) {
-    var _a, _b, _c;
+    const cookieHeader = getCookieHeader(url);
+    const navigationHeaders = {
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+      "Upgrade-Insecure-Requests": "1",
+      "Sec-Fetch-Dest": "document",
+      "Sec-Fetch-Mode": "navigate",
+      "Sec-Fetch-Site": "none",
+      "Sec-Fetch-User": "?1"
+    };
     const response = yield (0, import_axios.default)({
       url,
       method: options.method || "GET",
-      headers: mergeHeaders(options.headers),
+      headers: mergeHeaders(__spreadValues(__spreadValues(__spreadValues({}, navigationHeaders), cookieHeader ? { Cookie: cookieHeader } : {}), options.headers || {})),
       data: options.body,
       responseType: "text",
       maxRedirects: 5,
       timeout: 15e3,
       validateStatus: () => true
     });
+    storeCookies(url, response);
+    return response;
+  });
+}
+function warmHost(url, headers) {
+  return __async(this, null, function* () {
+    const parsed = new URL(url);
+    yield issueRequest(parsed.origin, {
+      headers: __spreadValues({
+        Referer: parsed.origin
+      }, headers || {})
+    }).catch(() => null);
+  });
+}
+function fetchPage(_0) {
+  return __async(this, arguments, function* (url, options = {}) {
+    var _a, _b, _c;
+    let response = yield issueRequest(url, options);
+    if (response.status === 403 && !options._warmed) {
+      yield warmHost(url, options.headers);
+      response = yield issueRequest(url, __spreadProps(__spreadValues({}, options), { _warmed: true }));
+    }
     if (response.status < 200 || response.status >= 300) {
       throw new Error(`HTTP ${response.status}: ${response.statusText} for ${url}`);
     }
