@@ -1,6 +1,6 @@
 /**
  * webstreamer-latino - Built from src/webstreamer-latino/
- * Generated: 2026-03-13T04:05:05.230Z
+ * Generated: 2026-03-13T05:44:08.647Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -93,28 +93,33 @@ var SOURCE_BASES = {
 };
 
 // src/webstreamer-latino/http.js
+var import_axios = __toESM(require("axios"));
 function mergeHeaders(headers) {
   return __spreadValues(__spreadValues({}, DEFAULT_HEADERS), headers || {});
 }
 function fetchPage(_0) {
   return __async(this, arguments, function* (url, options = {}) {
-    const response = yield fetch(url, {
+    var _a, _b, _c;
+    const response = yield (0, import_axios.default)({
+      url,
       method: options.method || "GET",
       headers: mergeHeaders(options.headers),
-      body: options.body,
-      redirect: "follow"
+      data: options.body,
+      responseType: "text",
+      maxRedirects: 5,
+      timeout: 15e3,
+      validateStatus: () => true
     });
-    if (!response.ok) {
+    if (response.status < 200 || response.status >= 300) {
       throw new Error(`HTTP ${response.status}: ${response.statusText} for ${url}`);
     }
-    const text = yield response.text();
     const headers = {};
-    for (const [key, value] of response.headers.entries()) {
-      headers[key.toLowerCase()] = value;
+    for (const [key, value] of Object.entries(response.headers || {})) {
+      headers[key.toLowerCase()] = Array.isArray(value) ? value.join(", ") : String(value);
     }
     return {
-      text,
-      url: response.url,
+      text: typeof response.data === "string" ? response.data : String(response.data || ""),
+      url: ((_b = (_a = response.request) == null ? void 0 : _a.res) == null ? void 0 : _b.responseUrl) || ((_c = response.config) == null ? void 0 : _c.url) || url,
       headers
     };
   });
@@ -127,18 +132,22 @@ function fetchText(_0) {
 }
 function fetchJson(_0) {
   return __async(this, arguments, function* (url, options = {}) {
-    const response = yield fetch(url, {
+    const response = yield (0, import_axios.default)({
+      url,
       method: options.method || "GET",
       headers: mergeHeaders(__spreadValues({
         Accept: "application/json,text/plain,*/*"
       }, options.headers || {})),
-      body: options.body,
-      redirect: "follow"
+      data: options.body,
+      responseType: "json",
+      maxRedirects: 5,
+      timeout: 15e3,
+      validateStatus: () => true
     });
-    if (!response.ok) {
+    if (response.status < 200 || response.status >= 300) {
       throw new Error(`HTTP ${response.status}: ${response.statusText} for ${url}`);
     }
-    return response.json();
+    return response.data;
   });
 }
 

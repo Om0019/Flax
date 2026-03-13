@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { DEFAULT_HEADERS } from './constants.js';
 
 function mergeHeaders(headers) {
@@ -5,27 +6,28 @@ function mergeHeaders(headers) {
 }
 
 export async function fetchPage(url, options = {}) {
-  const response = await fetch(url, {
+  const response = await axios({
+    url,
     method: options.method || 'GET',
     headers: mergeHeaders(options.headers),
-    body: options.body,
-    redirect: 'follow',
+    data: options.body,
+    responseType: 'text',
+    maxRedirects: 5,
+    timeout: 15000,
+    validateStatus: () => true,
   });
 
-  if (!response.ok) {
+  if (response.status < 200 || response.status >= 300) {
     throw new Error(`HTTP ${response.status}: ${response.statusText} for ${url}`);
   }
-
-  const text = await response.text();
   const headers = {};
-
-  for (const [key, value] of response.headers.entries()) {
-    headers[key.toLowerCase()] = value;
+  for (const [key, value] of Object.entries(response.headers || {})) {
+    headers[key.toLowerCase()] = Array.isArray(value) ? value.join(', ') : String(value);
   }
 
   return {
-    text,
-    url: response.url,
+    text: typeof response.data === 'string' ? response.data : String(response.data || ''),
+    url: response.request?.res?.responseUrl || response.config?.url || url,
     headers,
   };
 }
@@ -36,19 +38,23 @@ export async function fetchText(url, options = {}) {
 }
 
 export async function fetchJson(url, options = {}) {
-  const response = await fetch(url, {
+  const response = await axios({
+    url,
     method: options.method || 'GET',
     headers: mergeHeaders({
       Accept: 'application/json,text/plain,*/*',
       ...(options.headers || {}),
     }),
-    body: options.body,
-    redirect: 'follow',
+    data: options.body,
+    responseType: 'json',
+    maxRedirects: 5,
+    timeout: 15000,
+    validateStatus: () => true,
   });
 
-  if (!response.ok) {
+  if (response.status < 200 || response.status >= 300) {
     throw new Error(`HTTP ${response.status}: ${response.statusText} for ${url}`);
   }
 
-  return response.json();
+  return response.data;
 }

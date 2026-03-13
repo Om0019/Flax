@@ -3,6 +3,7 @@
  * Generated: 2025-12-31T21:23:16.687Z
  */
 "use strict";
+var axios = require("axios");
 var __defProp = Object.defineProperty;
 var __getOwnPropSymbols = Object.getOwnPropertySymbols;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
@@ -56,14 +57,25 @@ function makeRequest(_0) {
       "Connection": "keep-alive"
     }, options.headers);
     try {
-      const response = yield fetch(url, __spreadValues({
+      const response = yield axios(__spreadValues({
+        url,
         method: options.method || "GET",
-        headers: defaultHeaders
+        headers: defaultHeaders,
+        data: options.body,
+        responseType: "text",
+        timeout: 15e3,
+        maxRedirects: 5,
+        validateStatus: () => true
       }, options));
-      if (!response.ok) {
+      if (response.status < 200 || response.status >= 300) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
-      return response;
+      return {
+        status: response.status,
+        headers: response.headers || {},
+        text: () => Promise.resolve(typeof response.data === "string" ? response.data : String(response.data || "")),
+        json: () => Promise.resolve(typeof response.data === "string" ? JSON.parse(response.data) : response.data)
+      };
     } catch (error) {
       console.error(`[Vixsrc] Request failed for ${url}: ${error.message}`);
       throw error;
