@@ -77,6 +77,10 @@ async function resolveOne(result) {
     }
 
     if (/mixdrop|mixdrp|mixdroop|m1xdrop/i.test(host)) {
+      if (SHOULD_VALIDATE_MEDIA) {
+        console.log(`[WebstreamerLatino] Mixdrop skipped: ${result.url}`);
+        return [];
+      }
       return resolveMixdrop(result, url);
     }
 

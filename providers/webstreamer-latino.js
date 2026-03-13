@@ -1,6 +1,6 @@
 /**
  * webstreamer-latino - Built from src/webstreamer-latino/
- * Generated: 2026-03-13T10:30:32.714Z
+ * Generated: 2026-03-13T10:39:26.482Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -964,6 +964,10 @@ function resolveOne(result) {
         return resolveDropload(result, url);
       }
       if (/mixdrop|mixdrp|mixdroop|m1xdrop/i.test(host)) {
+        if (SHOULD_VALIDATE_MEDIA) {
+          console.log(`[WebstreamerLatino] Mixdrop skipped: ${result.url}`);
+          return [];
+        }
         return resolveMixdrop(result, url);
       }
       if (/filelions|vidhide/i.test(host)) {
