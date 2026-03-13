@@ -1,6 +1,6 @@
 /**
  * webstreamer-latino - Built from src/webstreamer-latino/
- * Generated: 2026-03-13T10:39:26.482Z
+ * Generated: 2026-03-13T10:45:58.727Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -296,19 +296,6 @@ function unpackPacker(source) {
     html = html.replace(match[0], unpacked);
   }
   return html;
-}
-function extractPackedUrl(source, patterns = []) {
-  const html = String(source || "");
-  const unpacked = unpackPacker(html);
-  const combined = `${html}
-${unpacked}`;
-  for (const pattern of patterns) {
-    const match = combined.match(pattern);
-    if (match && match[1]) {
-      return String(match[1]).replace(/\\\//g, "/");
-    }
-  }
-  return null;
 }
 function createUnbase(radix) {
   const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -964,11 +951,8 @@ function resolveOne(result) {
         return resolveDropload(result, url);
       }
       if (/mixdrop|mixdrp|mixdroop|m1xdrop/i.test(host)) {
-        if (SHOULD_VALIDATE_MEDIA) {
-          console.log(`[WebstreamerLatino] Mixdrop skipped: ${result.url}`);
-          return [];
-        }
-        return resolveMixdrop(result, url);
+        console.log(`[WebstreamerLatino] Mixdrop skipped: ${result.url}`);
+        return [];
       }
       if (/filelions|vidhide/i.test(host)) {
         return resolveFilelions(result, url);
@@ -1067,18 +1051,6 @@ function playerRank(player) {
       return 0;
   }
 }
-function extractCookieHeader(rawSetCookie) {
-  if (!rawSetCookie) {
-    return "";
-  }
-  const parts = String(rawSetCookie).split(/,(?=[^;,=\s]+=[^;,]+)/);
-  const cookies = parts.map((part) => part.trim().split(";")[0].trim()).filter(Boolean);
-  return uniqueBy(cookies, (cookie) => cookie.split("=")[0]).join("; ");
-}
-function mergeCookieHeaders(...values) {
-  const cookies = values.flatMap((value) => extractCookieHeader(value).split(/;\s*/)).filter(Boolean);
-  return uniqueBy(cookies, (cookie) => cookie.split("=")[0]).join("; ");
-}
 function validateDirectMedia(url, headers) {
   return __async(this, null, function* () {
     try {
@@ -1095,95 +1067,6 @@ function validateDirectMedia(url, headers) {
     } catch (_error) {
       return false;
     }
-  });
-}
-function resolveMixdrop(result, url) {
-  return __async(this, null, function* () {
-    var _a, _b, _c, _d, _e;
-    const normalized = new URL(url.href.replace("/f/", "/e/"));
-    const fileUrl = new URL(normalized.href.replace("/e/", "/f/"));
-    const baseHeaders = __spreadProps(__spreadValues({}, result.headers || {}), {
-      Referer: result.referer || normalized.origin
-    });
-    const embedPage = yield fetchPage(normalized.href, {
-      headers: __spreadProps(__spreadValues({}, baseHeaders), { Referer: fileUrl.href })
-    }).catch(() => null);
-    const filePage = embedPage ? null : yield fetchPage(fileUrl.href, { headers: baseHeaders }).catch(() => null);
-    const html = (embedPage == null ? void 0 : embedPage.text) || (filePage == null ? void 0 : filePage.text) || null;
-    let finalPageUrl = (embedPage == null ? void 0 : embedPage.url) || (filePage == null ? void 0 : filePage.url) || normalized.href;
-    let cookieHeader = mergeCookieHeaders(
-      (_a = result.headers) == null ? void 0 : _a.Cookie,
-      (_b = result.headers) == null ? void 0 : _b.cookie,
-      (_c = embedPage == null ? void 0 : embedPage.headers) == null ? void 0 : _c["set-cookie"],
-      (_d = filePage == null ? void 0 : filePage.headers) == null ? void 0 : _d["set-cookie"]
-    );
-    if (!html || /can't find the (file|video)/i.test(html)) {
-      console.log(`[WebstreamerLatino] Mixdrop miss: ${url.href}`);
-      return [];
-    }
-    let directValue = extractPackedUrl(html, [
-      /(?:MDCore|Core|MDp)\.wurl\s*=\s*"([^"]+)"/,
-      /(?:MDCore|Core|MDp)\.wurl\s*=\s*'([^']+)'/,
-      /wurl\s*=\s*"([^"]+)"/,
-      /wurl\s*=\s*'([^']+)'/,
-      /src:\s*"([^"]+)"/,
-      /src:\s*'([^']+)'/,
-      /(?:vsr|wurl)[^"'`]*["'`]((?:https?:)?\/\/[^"'`]+)["'`]/
-    ]);
-    if ((!directValue || /^\/e\//.test(directValue)) && (filePage == null ? void 0 : filePage.text)) {
-      const iframePath = extractPackedUrl(filePage.text, [
-        /<iframe[^>]+src="([^"]+)"/i,
-        /<iframe[^>]+src='([^']+)'/i
-      ]);
-      if (iframePath) {
-        const iframeUrl = absoluteUrl(iframePath, fileUrl.origin);
-        const nestedPage = yield fetchPage(iframeUrl, {
-          headers: __spreadProps(__spreadValues({}, baseHeaders), { Referer: fileUrl.href })
-        }).catch(() => null);
-        const nestedHtml = (nestedPage == null ? void 0 : nestedPage.text) || null;
-        if (nestedHtml) {
-          finalPageUrl = nestedPage.url || finalPageUrl;
-          cookieHeader = mergeCookieHeaders(cookieHeader, (_e = nestedPage.headers) == null ? void 0 : _e["set-cookie"]);
-          directValue = extractPackedUrl(nestedHtml, [
-            /(?:MDCore|Core|MDp)\.wurl\s*=\s*"([^"]+)"/,
-            /(?:MDCore|Core|MDp)\.wurl\s*=\s*'([^']+)'/,
-            /wurl\s*=\s*"([^"]+)"/,
-            /wurl\s*=\s*'([^']+)'/,
-            /src:\s*"([^"]+)"/,
-            /src:\s*'([^']+)'/,
-            /(?:vsr|wurl)[^"'`]*["'`]((?:https?:)?\/\/[^"'`]+)["'`]/
-          ]);
-        }
-      }
-    }
-    if (!directValue || /^\/e\//.test(directValue)) {
-      console.log(`[WebstreamerLatino] Mixdrop parse miss: ${url.href}`);
-      return [];
-    }
-    const directUrl = absoluteUrl(directValue, normalized.origin);
-    const page = import_cheerio_without_node_native2.default.load((filePage == null ? void 0 : filePage.text) || html);
-    const title = page(".title b").text().trim() || result.title;
-    const finalEmbedUrl = new URL(finalPageUrl);
-    const finalFileUrl = new URL(finalEmbedUrl.href.replace("/e/", "/f/"));
-    const streamHeaders = {
-      Referer: finalFileUrl.href,
-      Origin: finalEmbedUrl.origin
-    };
-    if (cookieHeader) {
-      streamHeaders.Cookie = cookieHeader;
-    }
-    const isPlayable = !SHOULD_VALIDATE_MEDIA || (yield validateDirectMedia(directUrl, streamHeaders));
-    if (!isPlayable) {
-      console.log(`[WebstreamerLatino] Mixdrop blocked: ${url.href}`);
-      return [];
-    }
-    return [buildStream(result, {
-      title,
-      url: directUrl,
-      quality: "Auto",
-      headers: streamHeaders,
-      player: "Mixdrop"
-    })];
   });
 }
 function resolveFilelions(result, url) {
