@@ -7,6 +7,8 @@ const express = require('express'); // used later when attaching proxy route
 const TIMEOUT_MS = 15000;
 const IS_PROD = process.env.NODE_ENV === 'production';
 const PUBLIC_ADDON_BASE = (process.env.ADDON_PUBLIC_URL || '').replace(/\/$/, '');
+const DEFAULT_LOGO_URL = 'https://raw.githubusercontent.com/Om0019/Northstar/main/Assets/image.png';
+const ADDON_LOGO_URL = PUBLIC_ADDON_BASE ? `${PUBLIC_ADDON_BASE}/Assets/image.png` : DEFAULT_LOGO_URL;
 const addonConfig = require('./addon.config.json');
 const providers = [];
 const pDir = path.join(__dirname, 'providers');
@@ -110,8 +112,9 @@ function normalizeProxyTarget(rawUrl, headers = {}) {
 const builder = new addonBuilder({
     id: "org.stremio.nuvio.om019",
     // bump version whenever manifest/providers change so clients reload
-    version: "61.0.4",
+    version: "61.0.5",
     name: "Northstar",
+    logo: ADDON_LOGO_URL,
     resources: ["stream"],
     types: ["movie", "series"],
     idPrefixes: ["tt"],
@@ -204,6 +207,8 @@ function startServer(addonInterface, opts = {}) {
             providers: providers.map(p => p.name)
         });
     });
+
+    app.use('/Assets', express.static(path.join(__dirname, 'Assets')));
 
     app.use(require('stremio-addon-sdk').getRouter(addonInterface));
 
