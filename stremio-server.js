@@ -83,8 +83,8 @@ function proxyWrap(url, headers) {
 const builder = new addonBuilder({
     id: "org.stremio.nuvio.om019",
     // bump version whenever manifest/providers change so clients reload
-    version: "61.0.3",
-    name: "Northstar Streams",
+    version: "61.0.4",
+    name: "Northstar",
     resources: ["stream"],
     types: ["movie", "series"],
     idPrefixes: ["tt"],
