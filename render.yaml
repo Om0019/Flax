@@ -1,10 +1,10 @@
 services:
   - type: web
-    name: nuvio-providers
+    name: Northstar
     env: node
-    repo: https://github.com/Om0019/nuvio-providers.git
+    repo: https://github.com/Om0019/Northstar.git
     branch: main
-    buildCommand: npm install
+    buildCommand: npm install --include=dev
     startCommand: npm start
     healthCheckPath: /health
     envVars:

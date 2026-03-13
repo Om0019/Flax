@@ -9,7 +9,6 @@
         "start": "node stremio-server.js"
     },
     "devDependencies": {
-        "esbuild": "^0.20.0",
         "nodemon": "^3.0.0"
     },
     "keywords": [
@@ -23,6 +22,7 @@
         "cheerio-without-node-native": "^0.20.2",
         "crypto-js": "^4.2.0",
         "dotenv": "^17.3.1",
+        "esbuild": "^0.20.0",
         "stremio-addon-sdk": "^1.6.10"
     }
 }
