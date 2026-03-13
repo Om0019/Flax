@@ -21,16 +21,20 @@ function buildTitle(tmdb, season, episode) {
 export async function getLatinoSourceResults(tmdb, mediaType, season, episode) {
   await Promise.allSettled([
     prewarmSource(SOURCE_BASES.cuevana),
+    prewarmSource(SOURCE_BASES.cinecalidad),
     prewarmSource(SOURCE_BASES.verhdlink),
     prewarmSource(SOURCE_BASES.tioplus),
+    prewarmSource(SOURCE_BASES.verpeliculasultra),
   ]);
 
   const tasks = [
     searchCuevana(tmdb, season, episode),
     searchCineHdPlus(tmdb, mediaType, season, episode),
+    searchCineCalidad(tmdb, mediaType),
     searchHomeCine(tmdb, season, episode),
     searchVerHdLink(tmdb, mediaType),
-    searchTioPlus(tmdb, mediaType),
+    searchTioPlus(tmdb, mediaType, season, episode),
+    searchVerPeliculasUltra(tmdb, mediaType),
   ];
 
   const settled = await Promise.allSettled(tasks);
@@ -198,6 +202,51 @@ async function searchCineHdPlus(tmdb, mediaType, season, episode) {
   return results;
 }
 
+async function searchCineCalidad(tmdb, mediaType) {
+  if (mediaType !== 'movie') {
+    return [];
+  }
+
+  const candidates = [tmdb.title, tmdb.originalTitle].filter(Boolean);
+  let pageUrl = null;
+
+  for (const candidate of candidates) {
+    const resultUrl = await findCineCalidadMovie(candidate, tmdb.year);
+    if (resultUrl) {
+      pageUrl = resultUrl;
+      break;
+    }
+  }
+
+  if (!pageUrl) {
+    return [];
+  }
+
+  const html = await fetchText(pageUrl, {
+    headers: { Referer: SOURCE_BASES.cinecalidad },
+  });
+  const $ = cheerio.load(html);
+  const results = [];
+
+  $('#playeroptionsul li[data-option]').each((_, el) => {
+    const rawUrl = ($(el).attr('data-option') || '').trim();
+    if (!rawUrl || /youtube\.com\/embed/i.test(rawUrl)) {
+      return;
+    }
+
+    results.push({
+      source: 'Cinecalidad',
+      ...languageMeta('mx'),
+      title: buildTitle(tmdb),
+      url: rawUrl.replace(/^(https:)?\/\//, 'https://'),
+      referer: pageUrl,
+      headers: { Referer: pageUrl },
+    });
+  });
+
+  return results;
+}
+
 async function searchHomeCine(tmdb, season, episode) {
   const candidateNames = [tmdb.title, tmdb.originalTitle].filter(Boolean);
   let pageUrl = null;
@@ -333,7 +382,135 @@ async function searchVerHdLink(tmdb, mediaType) {
   return results;
 }
 
-async function searchTioPlus(tmdb, mediaType) {
+async function findCineCalidadMovie(title, year) {
+  const searchUrl = `${SOURCE_BASES.cinecalidad}/?s=${encodeURIComponent(title)}`;
+  const html = await fetchText(searchUrl, {
+    headers: { Referer: SOURCE_BASES.cinecalidad },
+  });
+  const $ = cheerio.load(html);
+  const targetNorm = normalizeTitle(title);
+  let best = null;
+
+  $('#archive-content article.item.movies').each((_, el) => {
+    const href = $(el).find('a[href*="/ver-pelicula/"]').first().attr('href');
+    const rawTitle = $(el).find('.in_title').first().text().trim();
+    if (!href || !rawTitle) {
+      return;
+    }
+
+    let score = 0;
+    const norm = normalizeTitle(rawTitle);
+    if (norm === targetNorm) {
+      score += 10;
+    }
+    if (norm.includes(targetNorm) || targetNorm.includes(norm)) {
+      score += 5;
+    }
+
+    const yearText = $(el).find('.home_post_content p').eq(1).text().trim();
+    if (year && yearText === year) {
+      score += 4;
+    }
+
+    if (!best || score > best.score) {
+      best = { href, score };
+    }
+  });
+
+  return best && best.score >= 5 ? best.href : null;
+}
+
+async function searchTioPlusSeries(tmdb, season, episode) {
+  const candidates = [tmdb.originalTitle, tmdb.title].filter(Boolean);
+  let seriesUrl = null;
+
+  for (const candidate of candidates) {
+    const resultUrl = await findTioPlusSeries(candidate, tmdb.year);
+    if (resultUrl) {
+      seriesUrl = resultUrl;
+      break;
+    }
+  }
+
+  if (!seriesUrl) {
+    return [];
+  }
+
+  const seriesHtml = await fetchText(seriesUrl, {
+    headers: { Referer: SOURCE_BASES.tioplus },
+  });
+  const $ = cheerio.load(seriesHtml);
+  const episodeHref = $('#episodeList a.itemA[href]')
+    .map((_, el) => $(el).attr('href'))
+    .get()
+    .find((href) => {
+      if (!href) {
+        return false;
+      }
+
+      try {
+        const pathname = new URL(href, SOURCE_BASES.tioplus).pathname.replace(/\/+$/, '');
+        return pathname === `/serie/${pathname.split('/')[2]}/season/${season}/episode/${episode}`;
+      } catch (_error) {
+        return false;
+      }
+    });
+
+  if (!episodeHref) {
+    return [];
+  }
+
+  const episodeUrl = new URL(episodeHref, SOURCE_BASES.tioplus).href;
+  const html = await fetchText(episodeUrl, {
+    headers: { Referer: seriesUrl },
+  });
+  const $$ = cheerio.load(html);
+  const results = [];
+
+  $$('.bg-tabs > div').each((_, section) => {
+    const buttonText = $$(section).find('button').first().text().toLowerCase();
+    if (!buttonText.includes('latino')) {
+      return;
+    }
+
+    $$(section).find('li[data-server]').each((__, el) => {
+      const token = $$(el).attr('data-server');
+      if (!token) {
+        return;
+      }
+
+      results.push({
+        source: 'TioPlus',
+        ...languageMeta('mx'),
+        title: buildTitle(tmdb, season, episode),
+        url: `${SOURCE_BASES.tioplus}/player/${Buffer.from(token).toString('base64')}`,
+        referer: episodeUrl,
+        headers: { Referer: episodeUrl },
+        _tioplusToken: token,
+      });
+    });
+  });
+
+  if (results.length === 0) {
+    return [];
+  }
+
+  const resolved = await Promise.allSettled(results.map(resolveTioPlusPlayer));
+
+  return resolved.flatMap((result) => (
+    result.status === 'fulfilled' && result.value ? [result.value] : []
+  ));
+}
+
+async function searchTioPlus(tmdb, mediaType, season, episode) {
+  if (mediaType === 'tv' && season && episode) {
+    return searchTioPlusSeries(tmdb, season, episode);
+  }
+
+  return searchTioPlusMovieFlow(tmdb, mediaType);
+}
+
+async function searchTioPlusMovieFlow(tmdb, mediaType) {
   if (mediaType !== 'movie') {
     return [];
   }
@@ -394,6 +571,97 @@ async function searchTioPlus(tmdb, mediaType) {
   ));
 }
 
+async function searchVerPeliculasUltra(tmdb, mediaType) {
+  if (mediaType !== 'movie') {
+    return [];
+  }
+
+  const candidates = [tmdb.title, tmdb.originalTitle].filter(Boolean);
+  let pageUrl = null;
+
+  for (const candidate of candidates) {
+    const resultUrl = await findVerPeliculasUltraMovie(candidate, tmdb.year);
+    if (resultUrl) {
+      pageUrl = resultUrl;
+      break;
+    }
+  }
+
+  if (!pageUrl) {
+    return [];
+  }
+
+  const html = await fetchText(pageUrl, {
+    headers: { Referer: SOURCE_BASES.verpeliculasultra },
+  });
+  const $ = cheerio.load(html);
+  const results = [];
+
+  $('#ts21 .play-btn-cont[data-src], #ts2 .play-btn-cont[data-src]').each((_, el) => {
+    const rawUrl = ($(el).attr('data-src') || '').trim();
+    if (!rawUrl) {
+      return;
+    }
+
+    results.push({
+      source: 'VerPeliculasUltra',
+      ...languageMeta('mx'),
+      title: buildTitle(tmdb),
+      url: rawUrl.replace(/^(https:)?\/\//, 'https://'),
+      referer: pageUrl,
+      headers: { Referer: pageUrl },
+    });
+  });
+
+  return results;
+}
+
+async function findVerPeliculasUltraMovie(title, year) {
+  const searchUrl = `${SOURCE_BASES.verpeliculasultra}/index.php?do=search&subaction=search&story=${encodeURIComponent(title)}`;
+  const html = await fetchText(searchUrl, {
+    headers: {
+      Referer: SOURCE_BASES.verpeliculasultra,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+  });
+  const $ = cheerio.load(html);
+  const targetNorm = normalizeTitle(title);
+  let best = null;
+
+  $('a[href$=".html"][title]').each((_, el) => {
+    const href = $(el).attr('href');
+    const rawTitle = ($(el).attr('title') || $(el).text() || '').trim();
+    if (!href || !rawTitle) {
+      return;
+    }
+
+    let score = 0;
+    const norm = normalizeTitle(rawTitle);
+    if (norm === targetNorm) {
+      score += 10;
+    }
+    if (norm.includes(targetNorm) || targetNorm.includes(norm)) {
+      score += 5;
+    }
+
+    const article = $(el).closest('article, .shortstory, .base.shortstory, li, div');
+    const yearText = article.text().match(/\b(19|20)\d{2}\b/);
+    if (year && yearText && yearText[0] === year) {
+      score += 4;
+    }
+
+    if (/serie|temporada|cap[ií]tulo/i.test(rawTitle)) {
+      score -= 5;
+    }
+
+    if (!best || score > best.score) {
+      best = { href, score };
+    }
+  });
+
+  return best && best.score >= 5 ? new URL(best.href, SOURCE_BASES.verpeliculasultra).href : null;
+}
+
 async function findTioPlusMovie(title, year) {
   const searchUrl = `${SOURCE_BASES.tioplus}/api/search/${encodeURIComponent(title)}`;
   const html = await fetchText(searchUrl, {
@@ -436,6 +704,58 @@ async function findTioPlusMovie(title, year) {
 
     if (!year && matchYear) {
       score += 1;
+    }
+
+    if (!best) {
+      score += 1;
+    }
+
+    if (!best || score > best.score) {
+      best = { href, score };
+    }
+  });
+
+  return best && best.score >= 1 ? best.href : null;
+}
+
+async function findTioPlusSeries(title, year) {
+  const searchUrl = `${SOURCE_BASES.tioplus}/api/search/${encodeURIComponent(title)}`;
+  const html = await fetchText(searchUrl, {
+    headers: {
+      Referer: `${SOURCE_BASES.tioplus}/search`,
+      Accept: 'text/html,*/*;q=0.8',
+      'X-Requested-With': 'XMLHttpRequest',
+    },
+  });
+
+  if (/No hay resultados/i.test(html)) {
+    return null;
+  }
+
+  const $ = cheerio.load(`<div>${html}</div>`);
+  const targetNorm = normalizeTitle(title);
+  let best = null;
+
+  $('a.itemA[href]').each((_, el) => {
+    const href = $(el).attr('href');
+    const rawTitle = $(el).find('h2').text().trim();
+    const kind = $(el).find('.typeItem').text().toLowerCase();
+    if (!href || !rawTitle || !kind.includes('serie')) {
+      return;
+    }
+
+    let score = 0;
+    const norm = normalizeTitle(rawTitle.replace(/\(\d{4}\)/, '').trim());
+    if (norm === targetNorm) {
+      score += 10;
+    }
+    if (norm.includes(targetNorm) || targetNorm.includes(norm)) {
+      score += 5;
+    }
+
+    const matchYear = rawTitle.match(/\((\d{4})\)/);
+    if (year && matchYear && matchYear[1] === year) {
+      score += 4;
     }
 
     if (!best) {

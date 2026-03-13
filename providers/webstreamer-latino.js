@@ -1,6 +1,6 @@
 /**
  * webstreamer-latino - Built from src/webstreamer-latino/
- * Generated: 2026-03-13T10:45:58.727Z
+ * Generated: 2026-03-13T11:55:08.986Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -357,7 +357,7 @@ function getLatinoSourceResults(tmdb, mediaType, season, episode) {
       searchCineCalidad(tmdb, mediaType),
       searchHomeCine(tmdb, season, episode),
       searchVerHdLink(tmdb, mediaType),
-      searchTioPlus(tmdb, mediaType),
+      searchTioPlus(tmdb, mediaType, season, episode),
       searchVerPeliculasUltra(tmdb, mediaType)
     ];
     const settled = yield Promise.allSettled(tasks);
@@ -683,7 +683,81 @@ function findCineCalidadMovie(title, year) {
     return best && best.score >= 5 ? best.href : null;
   });
 }
-function searchTioPlus(tmdb, mediaType) {
+function searchTioPlusSeries(tmdb, season, episode) {
+  return __async(this, null, function* () {
+    const candidates = [tmdb.originalTitle, tmdb.title].filter(Boolean);
+    let seriesUrl = null;
+    for (const candidate of candidates) {
+      const resultUrl = yield findTioPlusSeries(candidate, tmdb.year);
+      if (resultUrl) {
+        seriesUrl = resultUrl;
+        break;
+      }
+    }
+    if (!seriesUrl) {
+      return [];
+    }
+    const seriesHtml = yield fetchText(seriesUrl, {
+      headers: { Referer: SOURCE_BASES.tioplus }
+    });
+    const $ = import_cheerio_without_node_native.default.load(seriesHtml);
+    const episodeHref = $("#episodeList a.itemA[href]").map((_, el) => $(el).attr("href")).get().find((href) => {
+      if (!href) {
+        return false;
+      }
+      try {
+        const pathname = new URL(href, SOURCE_BASES.tioplus).pathname.replace(/\/+$/, "");
+        return pathname === `/serie/${pathname.split("/")[2]}/season/${season}/episode/${episode}`;
+      } catch (_error) {
+        return false;
+      }
+    });
+    if (!episodeHref) {
+      return [];
+    }
+    const episodeUrl = new URL(episodeHref, SOURCE_BASES.tioplus).href;
+    const html = yield fetchText(episodeUrl, {
+      headers: { Referer: seriesUrl }
+    });
+    const $$ = import_cheerio_without_node_native.default.load(html);
+    const results = [];
+    $$(".bg-tabs > div").each((_, section) => {
+      const buttonText = $$(section).find("button").first().text().toLowerCase();
+      if (!buttonText.includes("latino")) {
+        return;
+      }
+      $$(section).find("li[data-server]").each((__, el) => {
+        const token = $$(el).attr("data-server");
+        if (!token) {
+          return;
+        }
+        results.push(__spreadProps(__spreadValues({
+          source: "TioPlus"
+        }, languageMeta("mx")), {
+          title: buildTitle(tmdb, season, episode),
+          url: `${SOURCE_BASES.tioplus}/player/${Buffer.from(token).toString("base64")}`,
+          referer: episodeUrl,
+          headers: { Referer: episodeUrl },
+          _tioplusToken: token
+        }));
+      });
+    });
+    if (results.length === 0) {
+      return [];
+    }
+    const resolved = yield Promise.allSettled(results.map(resolveTioPlusPlayer));
+    return resolved.flatMap((result) => result.status === "fulfilled" && result.value ? [result.value] : []);
+  });
+}
+function searchTioPlus(tmdb, mediaType, season, episode) {
+  return __async(this, null, function* () {
+    if (mediaType === "tv" && season && episode) {
+      return searchTioPlusSeries(tmdb, season, episode);
+    }
+    return searchTioPlusMovieFlow(tmdb, mediaType);
+  });
+}
+function searchTioPlusMovieFlow(tmdb, mediaType) {
   return __async(this, null, function* () {
     if (mediaType !== "movie") {
       return [];
@@ -850,6 +924,51 @@ function findTioPlusMovie(title, year) {
       }
       if (!year && matchYear) {
         score += 1;
+      }
+      if (!best) {
+        score += 1;
+      }
+      if (!best || score > best.score) {
+        best = { href, score };
+      }
+    });
+    return best && best.score >= 1 ? best.href : null;
+  });
+}
+function findTioPlusSeries(title, year) {
+  return __async(this, null, function* () {
+    const searchUrl = `${SOURCE_BASES.tioplus}/api/search/${encodeURIComponent(title)}`;
+    const html = yield fetchText(searchUrl, {
+      headers: {
+        Referer: `${SOURCE_BASES.tioplus}/search`,
+        Accept: "text/html,*/*;q=0.8",
+        "X-Requested-With": "XMLHttpRequest"
+      }
+    });
+    if (/No hay resultados/i.test(html)) {
+      return null;
+    }
+    const $ = import_cheerio_without_node_native.default.load(`<div>${html}</div>`);
+    const targetNorm = normalizeTitle(title);
+    let best = null;
+    $("a.itemA[href]").each((_, el) => {
+      const href = $(el).attr("href");
+      const rawTitle = $(el).find("h2").text().trim();
+      const kind = $(el).find(".typeItem").text().toLowerCase();
+      if (!href || !rawTitle || !kind.includes("serie")) {
+        return;
+      }
+      let score = 0;
+      const norm = normalizeTitle(rawTitle.replace(/\(\d{4}\)/, "").trim());
+      if (norm === targetNorm) {
+        score += 10;
+      }
+      if (norm.includes(targetNorm) || targetNorm.includes(norm)) {
+        score += 5;
+      }
+      const matchYear = rawTitle.match(/\((\d{4})\)/);
+      if (year && matchYear && matchYear[1] === year) {
+        score += 4;
       }
       if (!best) {
         score += 1;
