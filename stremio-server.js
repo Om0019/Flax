@@ -577,6 +577,18 @@ function proxyWrap(url, headers, extraParams = {}) {
     return base ? `${base}${proxyPath}` : proxyPath;
 }
 
+function proxyWrapHls(url, headers, extraParams = {}) {
+    const encodedUrl = encodeURIComponent(url);
+    const encodedHeaders = encodeURIComponent(JSON.stringify(headers || {}));
+    const extraQuery = Object.entries(extraParams)
+        .filter(([, value]) => value != null && value !== '')
+        .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+        .join('&');
+    const proxyPath = `/proxy/hls/manifest.m3u8?url=${encodedUrl}&headers=${encodedHeaders}${extraQuery ? `&${extraQuery}` : ''}`;
+    const base = requestBase();
+    return base ? `${base}${proxyPath}` : proxyPath;
+}
+
 function mediaflowProxyWrap(req, url, headers) {
     const encodedUrl = encodeURIComponent(url);
     const encodedHeaders = encodeURIComponent(JSON.stringify(headers || {}));
@@ -822,7 +834,10 @@ builder.defineStreamHandler(async ({ type, id }) => {
                 player: s.player || null,
             });
 
-            const proxiedUrl = proxyWrap(s.url, finalHeaders, { sid: playbackSession.id });
+            const isHls = String(s.type || '').toLowerCase() === 'hls' || String(s.url || '').toLowerCase().includes('.m3u8');
+            const proxiedUrl = isHls
+                ? proxyWrapHls(s.url, finalHeaders, { sid: playbackSession.id })
+                : proxyWrap(s.url, finalHeaders, { sid: playbackSession.id });
 
             return {
                 name: s.name || "Source",
