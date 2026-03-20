@@ -13,6 +13,7 @@ export const DEFAULT_HEADERS = {
 
 export const SOURCE_BASES = {
   cuevana: 'https://ww1.cuevana3.is',
+  cinecalidad: 'https://www.cinecalidad.am',
   cinehdplus: 'https://cinehdplus.gratis',
   homecine: 'https://www3.homecine.to',
   verhdlink: 'https://verhdlink.cam',

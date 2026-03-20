@@ -68,6 +68,53 @@ function scoreSearchCandidate(targetTitle, rawTitle, expectedYear, matchedYear) 
   return score;
 }
 
+function extractCineCalidadCardTitle($, el) {
+  const candidates = [
+    $(el).find('.in_title').first().text(),
+    $(el).find('img[alt]').first().attr('alt'),
+    $(el).find('.title, h2, h3').first().text(),
+  ];
+
+  for (const candidate of candidates) {
+    const value = String(candidate || '').replace(/\s+/g, ' ').trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return '';
+}
+
+function inferBlockedLatinoPlayer(value) {
+  const text = String(value || '').toLowerCase();
+
+  if (text.includes('supervideo')) return 'SuperVideo';
+  if (text.includes('dropload') || text.includes('dr0pstream')) return 'Dropload';
+  if (text.includes('vudeo')) return 'Vudeo';
+  if (text.includes('waaw') || text.includes('vidora')) return 'Vidora';
+  if (text.includes('plustream')) return 'Plustream';
+
+  return null;
+}
+
+function isBlockedLatinoResult(result) {
+  if (!result) {
+    return true;
+  }
+
+  return Boolean(
+    inferBlockedLatinoPlayer(result.player)
+    || inferBlockedLatinoPlayer(result.url)
+    || inferBlockedLatinoPlayer(result.referer)
+  );
+}
+
+function appendLatinoResult(results, result) {
+  if (!isBlockedLatinoResult(result)) {
+    results.push(result);
+  }
+}
+
 export async function getLatinoSourceResults(tmdb, mediaType, season, episode) {
   const disabled = new Set(
     String(process.env.WEBSTREAMER_LATINO_DISABLED_SOURCES || '')
@@ -93,9 +140,7 @@ export async function getLatinoSourceResults(tmdb, mediaType, season, episode) {
   await Promise.allSettled([
     prewarmSource(SOURCE_BASES.cuevana),
     prewarmSource(SOURCE_BASES.cinecalidad),
-    prewarmSource(SOURCE_BASES.verhdlink),
     prewarmSource(SOURCE_BASES.tioplus),
-    prewarmSource(SOURCE_BASES.verpeliculasultra),
   ]);
 
   const cuevanaResults = disabled.has('cuevana')
@@ -106,24 +151,21 @@ export async function getLatinoSourceResults(tmdb, mediaType, season, episode) {
     });
 
   const tasks = [
-    !disabled.has('cinehdplus') && withTimeout('cinehdplus', searchCineHdPlus(tmdb, mediaType, season, episode)),
     !disabled.has('cinecalidad') && withTimeout('cinecalidad', searchCineCalidad(tmdb, mediaType, season, episode)),
     !disabled.has('homecine') && withTimeout('homecine', searchHomeCine(tmdb, season, episode)),
-    !disabled.has('verhdlink') && withTimeout('verhdlink', searchVerHdLink(tmdb, mediaType)),
     !disabled.has('tioplus') && withTimeout('tioplus', searchTioPlus(tmdb, mediaType, season, episode)),
-    !disabled.has('verpeliculasultra') && withTimeout('verpeliculasultra', searchVerPeliculasUltra(tmdb, mediaType)),
   ].filter(Boolean);
 
   const settled = await Promise.allSettled(tasks);
 
   return settled.flatMap((result) => {
     if (result.status === 'fulfilled') {
-      return result.value;
+      return result.value.filter((entry) => !isBlockedLatinoResult(entry));
     }
 
     console.error('[WebstreamerLatino] Source error:', result.reason ? result.reason.message : result.reason);
     return [];
-  }).concat(cuevanaResults);
+  }).concat(cuevanaResults.filter((entry) => !isBlockedLatinoResult(entry)));
 }
 
 async function prewarmSource(baseUrl) {
@@ -217,7 +259,7 @@ async function searchCuevana(tmdb, season, episode) {
         return;
       }
 
-      results.push({
+      appendLatinoResult(results, {
         source: 'Cuevana',
         language: 'Latino',
         title: buildTitle(tmdb, season, episode),
@@ -236,35 +278,31 @@ async function searchCineHdPlus(tmdb, mediaType, season, episode) {
     return [];
   }
 
-  const searchUrl = `${SOURCE_BASES.cinehdplus}/series/?story=${tmdb.tmdbId}&do=search&subaction=search`;
-  const html = await fetchText(searchUrl);
-  const $ = cheerio.load(html);
-  const pageUrl = $('.card__title a[href]').first().attr('href');
-
-  if (!pageUrl) {
+  const candidate = await findCineHdPlusSeriesPage(tmdb, season, episode);
+  if (!candidate) {
     return [];
   }
 
-  const pageHtml = await fetchText(pageUrl);
-  const $$ = cheerio.load(pageHtml);
-  const isLatino = /latino/i.test($$('.details__langs').text());
+  const { pageUrl, pageHtml } = candidate;
+  const $ = cheerio.load(pageHtml);
+  const isLatino = /latino/i.test($('.details__langs').text());
   if (!isLatino) {
     return [];
   }
 
-  const title = `${$$('meta[property="og:title"]').attr('content') || tmdb.title} ${buildEpisodeTag(season, episode)}`;
+  const title = `${$('meta[property="og:title"]').attr('content') || tmdb.title} ${buildEpisodeTag(season, episode)}`;
   const results = [];
 
-  $$(`[data-num="${season}x${episode}"]`)
+  $(`[data-num="${season}x${episode}"]`)
     .siblings('.mirrors')
     .children('[data-link]')
     .each((_, el) => {
-      const rawUrl = $$(el).attr('data-link');
+      const rawUrl = $(el).attr('data-link');
       if (!rawUrl || /cinehdplus/.test(rawUrl)) {
         return;
       }
 
-      results.push({
+      appendLatinoResult(results, {
         source: 'CineHDPlus',
         ...languageMeta('mx'),
         title,
@@ -277,6 +315,62 @@ async function searchCineHdPlus(tmdb, mediaType, season, episode) {
   return results;
 }
 
+async function findCineHdPlusSeriesPage(tmdb, season, episode) {
+  const searchTerms = [
+    tmdb.tmdbId,
+    ...buildSearchTerms(tmdb.originalTitle, tmdb.title),
+  ].filter(Boolean);
+  const targetEpisode = `${season}x${episode}`;
+  const seen = new Set();
+  const candidates = [];
+
+  for (const searchTerm of searchTerms) {
+    const searchUrl = `${SOURCE_BASES.cinehdplus}/series/?story=${encodeURIComponent(searchTerm)}&do=search&subaction=search`;
+    const html = await fetchText(searchUrl, {
+      headers: { Referer: `${SOURCE_BASES.cinehdplus}/series/` },
+    });
+    const $ = cheerio.load(html);
+
+    $('.card__title a[href]').each((_, el) => {
+      const href = $(el).attr('href');
+      if (!href || seen.has(href)) {
+        return;
+      }
+
+      seen.add(href);
+      const rawTitle = $(el).text().replace(/\s+/g, ' ').trim();
+      const score = scoreSearchCandidate(tmdb.title, rawTitle, tmdb.year, null);
+
+      candidates.push({
+        href,
+        score,
+      });
+    });
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+
+  for (const candidate of candidates) {
+    const pageUrl = candidate.href;
+    const pageHtml = await fetchText(pageUrl, {
+      headers: { Referer: `${SOURCE_BASES.cinehdplus}/series/` },
+    }).catch(() => null);
+
+    if (!pageHtml) {
+      continue;
+    }
+
+    const $ = cheerio.load(pageHtml);
+    if ($(`[data-num="${targetEpisode}"]`).length === 0) {
+      continue;
+    }
+
+    return { pageUrl, pageHtml };
+  }
+
+  return null;
+}
+
 async function searchCineCalidad(tmdb, mediaType, season, episode) {
   if (mediaType === 'tv' && season && episode) {
     return searchCineCalidadSeries(tmdb, season, episode);
@@ -287,7 +381,7 @@ async function searchCineCalidad(tmdb, mediaType, season, episode) {
   }
 
   const pageUrl = await findCineCalidadPage(
-    [tmdb.title, tmdb.originalTitle].filter(Boolean),
+    buildSearchTerms(tmdb.title, tmdb.originalTitle),
     findCineCalidadMovie,
     tmdb.year
   );
@@ -301,7 +395,7 @@ async function searchCineCalidad(tmdb, mediaType, season, episode) {
 
 async function searchCineCalidadSeries(tmdb, season, episode) {
   const seriesUrl = await findCineCalidadPage(
-    [tmdb.title, tmdb.originalTitle].filter(Boolean),
+    buildSearchTerms(tmdb.title, tmdb.originalTitle),
     findCineCalidadSeries,
     tmdb.year
   );
@@ -347,7 +441,7 @@ async function extractCineCalidadPlayers(tmdb, pageUrl, season, episode) {
       return;
     }
 
-    results.push({
+    appendLatinoResult(results, {
       source: 'Cinecalidad',
       ...languageMeta('mx'),
       title: buildTitle(tmdb, season, episode),
@@ -400,13 +494,20 @@ async function searchHomeCine(tmdb, season, episode) {
       return;
     }
 
-    const iframeHtml = `<div>${href}</div>`;
-    const iframeSrc = cheerio.load(iframeHtml)('iframe').attr('src');
+    let iframeSrc = null;
+
+    if (href.startsWith('#')) {
+      iframeSrc = $(href).find('iframe[src]').first().attr('src') || null;
+    } else {
+      const iframeHtml = `<div>${href}</div>`;
+      iframeSrc = cheerio.load(iframeHtml)('iframe').attr('src') || null;
+    }
+
     if (!iframeSrc) {
       return;
     }
 
-    results.push({
+    appendLatinoResult(results, {
       source: 'HomeCine',
       ...languageMeta('mx'),
       title: buildTitle(tmdb, season, episode),
@@ -482,7 +583,7 @@ async function searchVerHdLink(tmdb, mediaType) {
       return;
     }
 
-    results.push({
+    appendLatinoResult(results, {
       source: 'VerHdLink',
       ...languageMeta('mx'),
       title: buildTitle(tmdb),
@@ -501,36 +602,24 @@ async function findCineCalidadMovie(title, year) {
     headers: { Referer: SOURCE_BASES.cinecalidad },
   });
   const $ = cheerio.load(html);
-  const targetNorm = normalizeTitle(title);
   let best = null;
 
   $('#archive-content article.item.movies').each((_, el) => {
     const href = $(el).find('a[href*="/ver-pelicula/"]').first().attr('href');
-    const rawTitle = $(el).find('.in_title').first().text().trim();
+    const rawTitle = extractCineCalidadCardTitle($, el);
     if (!href || !rawTitle) {
       return;
     }
 
-    let score = 0;
-    const norm = normalizeTitle(rawTitle);
-    if (norm === targetNorm) {
-      score += 10;
-    }
-    if (norm.includes(targetNorm) || targetNorm.includes(norm)) {
-      score += 5;
-    }
-
     const yearText = $(el).find('.home_post_content p').eq(1).text().trim();
-    if (year && yearText === year) {
-      score += 4;
-    }
+    const score = scoreSearchCandidate(title, rawTitle, year, yearText);
 
     if (!best || score > best.score) {
       best = { href, score };
     }
   });
 
-  return best && best.score >= 5 ? best.href : null;
+  return best && best.score >= 8 ? best.href : null;
 }
 
 async function findCineCalidadSeries(title, year) {
@@ -539,36 +628,24 @@ async function findCineCalidadSeries(title, year) {
     headers: { Referer: SOURCE_BASES.cinecalidad },
   });
   const $ = cheerio.load(html);
-  const targetNorm = normalizeTitle(title);
   let best = null;
 
   $('#archive-content article.item, #archive-content article').each((_, el) => {
     const href = $(el).find('a[href*="/ver-serie/"]').first().attr('href');
-    const rawTitle = $(el).find('.in_title, .title, h2, h3').first().text().trim();
+    const rawTitle = extractCineCalidadCardTitle($, el);
     if (!href || !rawTitle) {
       return;
     }
 
-    let score = 0;
-    const norm = normalizeTitle(rawTitle);
-    if (norm === targetNorm) {
-      score += 10;
-    }
-    if (norm.includes(targetNorm) || targetNorm.includes(norm)) {
-      score += 5;
-    }
-
     const yearText = $(el).find('.home_post_content p').eq(1).text().trim();
-    if (year && yearText === year) {
-      score += 4;
-    }
+    const score = scoreSearchCandidate(title, rawTitle, year, yearText);
 
     if (!best || score > best.score) {
       best = { href, score };
     }
   });
 
-  return best && best.score >= 5 ? best.href : null;
+  return best && best.score >= 8 ? best.href : null;
 }
 
 async function findCineCalidadEpisodeUrl(seriesUrl, season, episode) {
@@ -676,7 +753,7 @@ async function searchTioPlusSeries(tmdb, season, episode) {
         return;
       }
 
-      results.push({
+      appendLatinoResult(results, {
         source: 'TioPlus',
         ...languageMeta('mx'),
         title: buildTitle(tmdb, season, episode),
@@ -695,7 +772,7 @@ async function searchTioPlusSeries(tmdb, season, episode) {
   const resolved = await Promise.allSettled(results.map(resolveTioPlusPlayer));
 
   return resolved.flatMap((result) => (
-    result.status === 'fulfilled' && result.value ? [result.value] : []
+    result.status === 'fulfilled' && result.value && !isBlockedLatinoResult(result.value) ? [result.value] : []
   ));
 }
 
@@ -745,7 +822,7 @@ async function searchTioPlusMovieFlow(tmdb, mediaType) {
         return;
       }
 
-      results.push({
+      appendLatinoResult(results, {
         source: 'TioPlus',
         ...languageMeta('mx'),
         title: buildTitle(tmdb),
@@ -764,7 +841,7 @@ async function searchTioPlusMovieFlow(tmdb, mediaType) {
   const resolved = await Promise.allSettled(results.map(resolveTioPlusPlayer));
 
   return resolved.flatMap((result) => (
-    result.status === 'fulfilled' && result.value ? [result.value] : []
+    result.status === 'fulfilled' && result.value && !isBlockedLatinoResult(result.value) ? [result.value] : []
   ));
 }
 
@@ -800,7 +877,7 @@ async function searchVerPeliculasUltra(tmdb, mediaType) {
       return;
     }
 
-    results.push({
+    appendLatinoResult(results, {
       source: 'VerPeliculasUltra',
       ...languageMeta('mx'),
       title: buildTitle(tmdb),

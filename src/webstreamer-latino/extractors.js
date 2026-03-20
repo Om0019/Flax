@@ -224,6 +224,11 @@ async function resolveOne(result) {
       return [];
     }
 
+    if (/plustream/i.test(result.player || '')) {
+      console.log(`[WebstreamerLatino] Plustream skipped: ${result.url}`);
+      return [];
+    }
+
     if (/streamwish|bysejikuar/i.test(host) || /streamwish/i.test(result.player || '')) {
       return resolveStreamwish(result, url);
     }
@@ -258,6 +263,10 @@ async function resolveOne(result) {
 
     if (/fastream/i.test(host)) {
       return resolveFastream(result, url);
+    }
+
+    if (/goodstream/i.test(host)) {
+      return resolveGoodstream(result, url);
     }
 
     if (/waaw|vidora/i.test(host)) {
@@ -302,6 +311,7 @@ function inferPlayerFromUrl(url) {
   if (value.includes('dood') || value.includes('ds2play') || value.includes('vidply') || value.includes('doply')) return 'DoodStream';
   if (value.includes('streamtape') || value.includes('streamta.pe') || value.includes('strcloud')) return 'Streamtape';
   if (value.includes('fastream')) return 'Fastream';
+  if (value.includes('goodstream')) return 'Goodstream';
   if (value.includes('waaw') || value.includes('vidora')) return 'Vidora';
   if (value.includes('strp2p') || value.includes('4meplayer') || value.includes('upns.pro') || value.includes('p2pplay')) return 'StrP2P';
   if (value.includes('gxplayer') || value.includes('bullstream') || value.includes('mp4player')) return 'StreamEmbed';
@@ -329,6 +339,8 @@ function playerRank(player) {
       return 70;
     case 'Fastream':
       return 60;
+    case 'Goodstream':
+      return 58;
     case 'Mixdrop':
       return 55;
     case 'Vidora':
@@ -1075,6 +1087,42 @@ async function resolveStreamEmbed(result, url) {
     url: playlistUrl,
     quality: qualityList[0] ? `${qualityList[0]}p` : 'Auto',
     player: 'StreamEmbed',
+  })];
+}
+
+async function resolveGoodstream(result, url) {
+  const pageUrl = url.href;
+  const html = await fetchText(pageUrl, { headers: result.headers }).catch(() => null);
+  if (!html) {
+    console.log(`[WebstreamerLatino] Goodstream miss: ${pageUrl}`);
+    return [];
+  }
+
+  if (/expired|deleted|file is no longer available/i.test(html)) {
+    console.log(`[WebstreamerLatino] Goodstream dead link: ${pageUrl}`);
+    return [];
+  }
+
+  const fileMatch =
+    html.match(/sources:\s*\[\s*\{\s*file:"([^"]+\.m3u8[^"]*)"/i) ||
+    html.match(/sources:\s*\[\s*\{\s*file:'([^']+\.m3u8[^']*)'/i) ||
+    html.match(/file:"([^"]+\.m3u8[^"]*)"/i) ||
+    html.match(/file:'([^']+\.m3u8[^']*)'/i);
+
+  if (!fileMatch) {
+    console.log(`[WebstreamerLatino] Goodstream parse miss: ${pageUrl}`);
+    return [];
+  }
+
+  const playlistUrl = fileMatch[1].replace(/\\\//g, '/');
+  const streamHeaders = buildPlaybackHeaders(pageUrl);
+  const height = await guessHeightFromPlaylist(playlistUrl, streamHeaders).catch(() => null);
+
+  return [buildStream(result, {
+    url: playlistUrl,
+    quality: height ? `${height}p` : 'Auto',
+    headers: streamHeaders,
+    player: 'Goodstream',
   })];
 }
 
