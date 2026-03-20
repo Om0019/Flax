@@ -1072,6 +1072,31 @@ function streamPriority(stream) {
     }
 }
 
+function hasSpanishAudio(stream) {
+    const audioLanguages = Array.isArray(stream?.audioLanguages) ? stream.audioLanguages : [];
+    return audioLanguages.some((value) => /^spanish$/i.test(String(value || '').trim()));
+}
+
+function mexicanFlagOrderPriority(stream) {
+    const provider = String(stream?.provider || '').toLowerCase();
+    const player = String(stream?.player || inferPlayerFromStream(stream) || '').toLowerCase();
+    const visibleText = `${stream?.name || ''} ${stream?.title || ''}`;
+
+    if (provider === 'webstreamer-latino' || visibleText.includes('🇲🇽')) {
+        if (player === 'vimeos') return 5000;
+        if (provider === 'netmirror' && hasSpanishAudio(stream)) return 4900;
+        if (player === 'filelions') return 4800;
+        if (player === 'goodstream') return 4700;
+        return 4600;
+    }
+
+    if (provider === 'netmirror' && hasSpanishAudio(stream)) {
+        return 4900;
+    }
+
+    return 0;
+}
+
 const builder = new addonBuilder({
     id: "org.stremio.nuvio.om019",
     // bump version whenever manifest/providers change so clients reload
@@ -1172,6 +1197,10 @@ builder.defineStreamHandler(async ({ type, id }) => {
         })
         .filter((stream) => playerEnabled(stream.player))
         .sort((a, b) => {
+            const mexicanFlagDiff = mexicanFlagOrderPriority(b) - mexicanFlagOrderPriority(a);
+            if (mexicanFlagDiff !== 0) {
+                return mexicanFlagDiff;
+            }
             const priorityDiff = streamPriority(b) - streamPriority(a);
             if (priorityDiff !== 0) {
                 return priorityDiff;
