@@ -1017,28 +1017,41 @@ builder.defineStreamHandler(async ({ type, id }) => {
     // Convert series to tv
     const mediaType = type === "series" ? "tv" : "movie";
     const streamCacheKey = `${type}:${id}|tmdb:${tmdbId}|cfg:${controlState.configVersion}`;
-    const rawStreams = await getOrComputeCached(
-        streamResultCache,
-        streamResultInFlight,
-        streamCacheKey,
-        STREAM_RESULT_CACHE_TTL_MS,
-        async () => {
-            const enabledProviders = providers.filter((provider) => providerEnabled(provider.name));
-            const results = await Promise.all(
-                enabledProviders.map((provider) => withTimeout(
-                    Promise.resolve(provider.getStreams(tmdbId, mediaType, season, episode))
-                        .then((streams) => Array.isArray(streams)
-                            ? streams.map((stream) => ({ ...stream, provider: stream.provider || provider.name }))
-                            : []
-                        )
-                        .catch(() => []),
-                    TIMEOUT_MS,
-                    []
-                ))
-            ).catch(() => []);
-            return (Array.isArray(results) ? results.flat() : []).filter((stream) => stream && stream.url);
-        }
-    ).catch(() => []);
+    const enabledProviders = providers.filter((provider) => providerEnabled(provider.name));
+    const cachedProviders = enabledProviders.filter((provider) => provider.name !== 'webstreamer-latino');
+    const uncachedProviders = enabledProviders.filter((provider) => provider.name === 'webstreamer-latino');
+    const loadProviderStreams = async (providerList) => {
+        const results = await Promise.all(
+            providerList.map((provider) => withTimeout(
+                Promise.resolve(provider.getStreams(tmdbId, mediaType, season, episode))
+                    .then((streams) => Array.isArray(streams)
+                        ? streams.map((stream) => ({ ...stream, provider: stream.provider || provider.name }))
+                        : []
+                    )
+                    .catch(() => []),
+                TIMEOUT_MS,
+                []
+            ))
+        ).catch(() => []);
+
+        return (Array.isArray(results) ? results.flat() : []).filter((stream) => stream && stream.url);
+    };
+
+    const cachedRawStreams = cachedProviders.length === 0
+        ? []
+        : await getOrComputeCached(
+            streamResultCache,
+            streamResultInFlight,
+            streamCacheKey,
+            STREAM_RESULT_CACHE_TTL_MS,
+            async () => loadProviderStreams(cachedProviders)
+        ).catch(() => []);
+
+    const uncachedRawStreams = uncachedProviders.length === 0
+        ? []
+        : await loadProviderStreams(uncachedProviders).catch(() => []);
+
+    const rawStreams = cachedRawStreams.concat(uncachedRawStreams);
 
     const streams = rawStreams
         .filter(s => s && s.url)
