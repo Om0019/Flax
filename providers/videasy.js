@@ -537,6 +537,7 @@ function formatStreamsForNuvio(mediaData, serverName, serverConfig, mediaDetails
         name: `VIDEASY ${serverName} (${serverConfig.language})${languageInfo} - ${quality}`,
         title: title,
         url: source.url,
+        type: streamType === 'hls' ? 'hls' : void 0,
         quality: quality,
         size: 'Unknown',
         headers: headers,

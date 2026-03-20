@@ -765,9 +765,15 @@ function processDownloadLink(downloadPageUrl) {
 }
 
 // Find best match from search results (enhanced from 4KHDHub)
-function findBestMatch(results, query) {
+function findBestMatch(results, query, expectedYear) {
     if (!results || results.length === 0) return null;
-    if (results.length === 1) return results[0];
+    if (results.length === 1) {
+        var onlyTitle = results[0].title || '';
+        var onlyYear = onlyTitle.match(/\b(19|20)\d{2}\b/);
+        if (expectedYear && onlyYear && onlyYear[0] !== expectedYear) return null;
+        var onlySimilarity = calculateSimilarity(onlyTitle, query);
+        return (onlySimilarity >= 0.45 || normalizeTitle(onlyTitle) === normalizeTitle(query)) ? results[0] : null;
+    }
 
     var scored = results.map(function (r) {
         var score = 0;
@@ -776,11 +782,22 @@ function findBestMatch(results, query) {
         if (normalizeTitle(r.title).indexOf(normalizeTitle(query)) !== -1) score += 15; // quick containment bonus
         var lengthDiff = Math.abs(r.title.length - query.length);
         score += Math.max(0, 10 - lengthDiff / 5);
-        if (/(19|20)\d{2}/.test(r.title)) score += 5;
+        var yearMatch = (r.title || '').match(/\b(19|20)\d{2}\b/);
+        if (yearMatch) {
+            if (expectedYear && yearMatch[0] === expectedYear) score += 15;
+            else if (expectedYear && yearMatch[0] !== expectedYear) score -= 20;
+            else score += 5;
+        }
         return { item: r, score: score };
     });
     scored.sort(function (a, b) { return b.score - a.score; });
-    return scored[0].item;
+    var best = scored[0];
+    if (!best) return null;
+    var bestSimilarity = calculateSimilarity(best.item.title, query);
+    if (bestSimilarity < 0.45 && normalizeTitle(best.item.title) !== normalizeTitle(query)) {
+        return null;
+    }
+    return best.item;
 }
 
 // Parse quality for sorting
@@ -880,7 +897,11 @@ function getStreams(tmdbId, mediaType = 'movie', seasonNum = null, episodeNum = 
             }
 
             // 3. Extract download links from best match
-            const selectedResult = findBestMatch(searchResults, tmdb.title);
+            const selectedResult = findBestMatch(searchResults, tmdb.title, tmdb.year);
+            if (!selectedResult) {
+                console.log(`[DVDPlay] No suitable title match found for "${tmdb.title}" (${tmdb.year || 'N/A'})`);
+                return [];
+            }
             return extractDownloadLinks(selectedResult.url).then(downloadLinks => {
                 if (downloadLinks.length === 0) {
                     console.log(`[DVDPlay] No download pages found`);

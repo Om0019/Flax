@@ -227,7 +227,7 @@ function getStreams(tmdbId, mediaType = "movie", seasonNum = null, episodeNum = 
         title: "Auto Quality Stream",
         url: masterPlaylistUrl,
         quality: "Auto",
-        type: "direct",
+        type: "hls",
         headers: {
           "Referer": BASE_URL,
           "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"

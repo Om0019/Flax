@@ -265,13 +265,7 @@ function findCastleMovieId(securityKey, tmdbInfo) {
         }
       }
     }
-    const firstItem = rows[0];
-    const movieId = firstItem.id || firstItem.redirectId || firstItem.redirectIdStr;
-    if (movieId) {
-      console.log(`[Castle] Using first result: ${firstItem.title || firstItem.name} (id: ${movieId})`);
-      return movieId.toString();
-    }
-    throw new Error("Could not extract movie ID from search results");
+    throw new Error("No suitable search result found");
   });
 }
 

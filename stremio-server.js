@@ -9,6 +9,8 @@ const axios = require("axios");
 const express = require('express'); // used later when attaching proxy route
 
 const TIMEOUT_MS = 15000;
+const CINEMETA_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const STREAM_RESULT_CACHE_TTL_MS = 30 * 1000;
 const IS_PROD = process.env.NODE_ENV === 'production';
 const PUBLIC_ADDON_BASE = (process.env.ADDON_PUBLIC_URL || '').replace(/\/$/, '');
 const MONITOR_TOKEN = process.env.MONITOR_TOKEN || '';
@@ -53,9 +55,14 @@ const monitorState = {
 const controlState = {
     paused: false,
     stopped: false,
+    configVersion: 0,
     providers: new Map(),
     players: new Map(KNOWN_PLAYERS.map((player) => [player, { enabled: true, lastSeenAt: null, seenCount: 0 }])),
 };
+const cinemetaMetaCache = new Map();
+const cinemetaMetaInFlight = new Map();
+const streamResultCache = new Map();
+const streamResultInFlight = new Map();
 
 function trimArray(array, limit) {
     while (array.length > limit) {
@@ -386,13 +393,20 @@ function providerEnabled(name) {
     return controlState.providers.get(name)?.enabled !== false;
 }
 
+function bumpStreamConfigVersion() {
+    controlState.configVersion += 1;
+    streamResultCache.clear();
+    streamResultInFlight.clear();
+    touchMonitorState();
+}
+
 function setProviderEnabled(name, enabled) {
     const existing = controlState.providers.get(name);
     if (!existing) {
         return false;
     }
     controlState.providers.set(name, { ...existing, enabled: Boolean(enabled) });
-    touchMonitorState();
+    bumpStreamConfigVersion();
     return true;
 }
 
@@ -409,7 +423,7 @@ function setPlayerEnabled(name, enabled) {
     const playerName = normalizePlayerName(name);
     const existing = controlState.players.get(playerName) || { enabled: true, lastSeenAt: null, seenCount: 0 };
     controlState.players.set(playerName, { ...existing, enabled: Boolean(enabled) });
-    touchMonitorState();
+    bumpStreamConfigVersion();
 }
 
 function notePlayerSeen(name) {
@@ -508,19 +522,83 @@ function withTimeout(promise, ms, fallback) {
     ]);
 }
 
+function getCachedValue(cache, key) {
+    const cached = cache.get(key);
+    if (cached && cached.expiresAt > Date.now()) {
+        return cached.value;
+    }
+    if (cached) {
+        cache.delete(key);
+    }
+    return null;
+}
+
+function setCachedValue(cache, key, value, ttlMs) {
+    cache.set(key, {
+        value,
+        expiresAt: Date.now() + ttlMs,
+    });
+}
+
+async function getOrComputeCached(cache, inFlight, key, ttlMs, compute) {
+    const cached = getCachedValue(cache, key);
+    if (cached !== null) {
+        return cached;
+    }
+
+    if (inFlight.has(key)) {
+        return inFlight.get(key);
+    }
+
+    const promise = Promise.resolve()
+        .then(compute)
+        .then((value) => {
+            setCachedValue(cache, key, value, ttlMs);
+            inFlight.delete(key);
+            return value;
+        })
+        .catch((error) => {
+            inFlight.delete(key);
+            throw error;
+        });
+
+    inFlight.set(key, promise);
+    return promise;
+}
+
+async function fetchCinemetaMeta(type, imdbId) {
+    const cacheKey = `${type}:${imdbId}`;
+    return getOrComputeCached(cinemetaMetaCache, cinemetaMetaInFlight, cacheKey, CINEMETA_CACHE_TTL_MS, async () => {
+        const { data } = await axios.get(`https://v3-cinemeta.strem.io/meta/${type}/${imdbId}.json`, { timeout: 8000 });
+        return {
+            tmdbId: data?.meta?.moviedb_id || null,
+            metaName: data?.meta?.name || null,
+        };
+    });
+}
+
 if (fs.existsSync(pDir)) {
     fs.readdirSync(pDir).forEach(f => {
         const base = f.replace('.js', '');
+        const isActive = activeProviders.has(base);
         if (!IS_PROD) {
             console.log(`Found provider file: ${f}`);
+        }
+
+        if (!isActive) {
+            controlState.providers.set(base, { enabled: false, available: true });
+            if (!IS_PROD) {
+                console.log(`Registered inactive provider without loading: ${base}`);
+            }
+            return;
         }
 
         try {
             const p = require(path.join(pDir, f));
             if (p.getStreams) {
                 providers.push({ name: base, getStreams: p.getStreams });
-                controlState.providers.set(base, { enabled: activeProviders.has(base), available: true });
-                console.log(`${activeProviders.has(base) ? 'Loaded' : 'Registered'} provider: ${base}`);
+                controlState.providers.set(base, { enabled: true, available: true });
+                console.log(`Loaded provider: ${base}`);
             } else if (!IS_PROD) {
                 console.log(`Skipped ${base}: no getStreams`);
             }
@@ -587,6 +665,44 @@ function proxyWrapHls(url, headers, extraParams = {}) {
     const proxyPath = `/proxy/hls/manifest.m3u8?url=${encodedUrl}&headers=${encodedHeaders}${extraQuery ? `&${extraQuery}` : ''}`;
     const base = requestBase();
     return base ? `${base}${proxyPath}` : proxyPath;
+}
+
+function isLikelyHlsUrl(url, stream = null) {
+    const raw = String(url || '');
+    const lower = raw.toLowerCase();
+
+    if (!raw) {
+        return false;
+    }
+
+    const declaredType = String(stream && stream.type || '').toLowerCase();
+    if (declaredType === 'hls') {
+        return true;
+    }
+
+    if (lower.includes('.m3u8') || lower.includes('.m3u')) {
+        return true;
+    }
+
+    if (/[?&](format|type)=hls(?:[&#]|$)/i.test(raw)) {
+        return true;
+    }
+
+    try {
+        const parsed = new URL(raw);
+        const pathname = parsed.pathname.toLowerCase();
+        const basename = pathname.split('/').pop() || '';
+
+        if ((basename === 'master.txt' || basename === 'playlist.txt') && pathname.includes('/hls')) {
+            return true;
+        }
+
+        if (basename === 'master.txt' && /(filelions|vidhide|emturbovid|strp2p|4meplayer|upns)/i.test(parsed.hostname)) {
+            return true;
+        }
+    } catch (_error) {}
+
+    return false;
 }
 
 function mediaflowProxyWrap(req, url, headers) {
@@ -783,9 +899,9 @@ builder.defineStreamHandler(async ({ type, id }) => {
     let tmdbId = null;
     let metaName = null;
     try {
-        const { data } = await axios.get(`https://v3-cinemeta.strem.io/meta/${type}/${imdbId}.json`);
-        tmdbId = data.meta.moviedb_id;
-        metaName = data.meta.name || null;
+        const meta = await fetchCinemetaMeta(type, imdbId);
+        tmdbId = meta.tmdbId;
+        metaName = meta.metaName;
     } catch (e) {}
     
     if (!tmdbId) {
@@ -804,21 +920,31 @@ builder.defineStreamHandler(async ({ type, id }) => {
 
     // Convert series to tv
     const mediaType = type === "series" ? "tv" : "movie";
-    const enabledProviders = providers.filter((provider) => providerEnabled(provider.name));
-    const results = await Promise.all(
-        enabledProviders.map((provider) => withTimeout(
-            Promise.resolve(provider.getStreams(tmdbId, mediaType, season, episode))
-                .then((streams) => Array.isArray(streams)
-                    ? streams.map((stream) => ({ ...stream, provider: stream.provider || provider.name }))
-                    : []
-                )
-                .catch(() => []),
-            TIMEOUT_MS,
-            []
-        ))
+    const streamCacheKey = `${type}:${id}|tmdb:${tmdbId}|cfg:${controlState.configVersion}`;
+    const rawStreams = await getOrComputeCached(
+        streamResultCache,
+        streamResultInFlight,
+        streamCacheKey,
+        STREAM_RESULT_CACHE_TTL_MS,
+        async () => {
+            const enabledProviders = providers.filter((provider) => providerEnabled(provider.name));
+            const results = await Promise.all(
+                enabledProviders.map((provider) => withTimeout(
+                    Promise.resolve(provider.getStreams(tmdbId, mediaType, season, episode))
+                        .then((streams) => Array.isArray(streams)
+                            ? streams.map((stream) => ({ ...stream, provider: stream.provider || provider.name }))
+                            : []
+                        )
+                        .catch(() => []),
+                    TIMEOUT_MS,
+                    []
+                ))
+            ).catch(() => []);
+            return (Array.isArray(results) ? results.flat() : []).filter((stream) => stream && stream.url);
+        }
     ).catch(() => []);
 
-    const streams = (Array.isArray(results) ? results.flat() : [])
+    const streams = rawStreams
         .filter(s => s && s.url)
         .map((stream) => {
             const player = inferPlayerFromStream(stream);
@@ -868,8 +994,7 @@ builder.defineStreamHandler(async ({ type, id }) => {
             const urlLower = String(s.url || '').toLowerCase();
             const providerLower = String(s.provider || '').toLowerCase();
             const nameLower = String(s.name || '').toLowerCase();
-            const isHls = String(s.type || '').toLowerCase() === 'hls'
-                || urlLower.includes('.m3u8')
+            const isHls = isLikelyHlsUrl(s.url, s)
                 // vixsrc often returns playlist URLs without .m3u8 extension
                 || providerLower === 'vixsrc'
                 || nameLower.includes('vixsrc');
@@ -1220,7 +1345,7 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
             });
 
             const contentType = (resp.headers['content-type'] || '').toLowerCase();
-            const isPlaylist = contentType.includes('mpegurl') || targetUrl.endsWith('.m3u8');
+            const isPlaylist = contentType.includes('mpegurl') || isLikelyHlsUrl(targetUrl);
             if (isPlaylist) {
                 let data = '';
                 resp.data.on('data', chunk => data += chunk.toString());
@@ -1266,7 +1391,7 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
                         return toProxyUrl(trimmed);
                     }).join('\n');
 
-                    res.setHeader('content-type', resp.headers['content-type'] || 'application/vnd.apple.mpegurl');
+                    res.setHeader('content-type', 'application/vnd.apple.mpegurl');
                     res.removeHeader('content-length');
                     res.send(rewritten);
                 });

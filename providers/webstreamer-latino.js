@@ -1,6 +1,6 @@
 /**
  * webstreamer-latino - Built from src/webstreamer-latino/
- * Generated: 2026-03-19T07:01:35.863Z
+ * Generated: 2026-03-20T02:10:55.392Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -296,6 +296,19 @@ function unpackPacker(source) {
   }
   return html;
 }
+function extractPackedUrl(source, patterns = []) {
+  const html = String(source || "");
+  const unpacked = unpackPacker(html);
+  const combined = `${html}
+${unpacked}`;
+  for (const pattern of patterns) {
+    const match = combined.match(pattern);
+    if (match && match[1]) {
+      return String(match[1]).replace(/\\\//g, "/");
+    }
+  }
+  return null;
+}
 function createUnbase(radix) {
   const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
   return (value) => {
@@ -340,6 +353,29 @@ function buildTitle(tmdb, season, episode) {
     return `${tmdb.title} ${buildEpisodeTag(season, episode)}`;
   }
   return tmdb.year ? `${tmdb.title} (${tmdb.year})` : tmdb.title;
+}
+function scoreSearchCandidate(targetTitle, rawTitle, expectedYear, matchedYear) {
+  const targetNorm = normalizeTitle(targetTitle);
+  const rawNorm = normalizeTitle(rawTitle);
+  let score = 0;
+  if (!targetNorm || !rawNorm) {
+    return score;
+  }
+  if (rawNorm === targetNorm) {
+    score += 10;
+  } else if (rawNorm.includes(targetNorm) || targetNorm.includes(rawNorm)) {
+    score += 5;
+  }
+  if (expectedYear && matchedYear) {
+    if (matchedYear === expectedYear) {
+      score += 4;
+    } else {
+      score -= 3;
+    }
+  } else if (!expectedYear && matchedYear) {
+    score += 1;
+  }
+  return score;
 }
 function getLatinoSourceResults(tmdb, mediaType, season, episode) {
   return __async(this, null, function* () {
@@ -1023,7 +1059,6 @@ function findTioPlusMovie(title, year) {
       return null;
     }
     const $ = import_cheerio_without_node_native.default.load(`<div>${html}</div>`);
-    const targetNorm = normalizeTitle(title);
     let best = null;
     $("a.itemA[href]").each((_, el) => {
       const href = $(el).attr("href");
@@ -1032,29 +1067,13 @@ function findTioPlusMovie(title, year) {
       if (!href || !rawTitle || kind.includes("serie")) {
         return;
       }
-      let score = 0;
-      const norm = normalizeTitle(rawTitle.replace(/\(\d{4}\)/, "").trim());
-      if (norm === targetNorm) {
-        score += 10;
-      }
-      if (norm.includes(targetNorm) || targetNorm.includes(norm)) {
-        score += 5;
-      }
       const matchYear = rawTitle.match(/\((\d{4})\)/);
-      if (year && matchYear && matchYear[1] === year) {
-        score += 4;
-      }
-      if (!year && matchYear) {
-        score += 1;
-      }
-      if (!best) {
-        score += 1;
-      }
+      const score = scoreSearchCandidate(title, rawTitle.replace(/\(\d{4}\)/, "").trim(), year, matchYear ? matchYear[1] : null);
       if (!best || score > best.score) {
         best = { href, score };
       }
     });
-    return best && best.score >= 1 ? best.href : null;
+    return best && best.score >= 5 ? best.href : null;
   });
 }
 function findTioPlusSeries(title, year) {
@@ -1071,7 +1090,6 @@ function findTioPlusSeries(title, year) {
       return null;
     }
     const $ = import_cheerio_without_node_native.default.load(`<div>${html}</div>`);
-    const targetNorm = normalizeTitle(title);
     let best = null;
     $("a.itemA[href]").each((_, el) => {
       const href = $(el).attr("href");
@@ -1080,26 +1098,13 @@ function findTioPlusSeries(title, year) {
       if (!href || !rawTitle || !kind.includes("serie")) {
         return;
       }
-      let score = 0;
-      const norm = normalizeTitle(rawTitle.replace(/\(\d{4}\)/, "").trim());
-      if (norm === targetNorm) {
-        score += 10;
-      }
-      if (norm.includes(targetNorm) || targetNorm.includes(norm)) {
-        score += 5;
-      }
       const matchYear = rawTitle.match(/\((\d{4})\)/);
-      if (year && matchYear && matchYear[1] === year) {
-        score += 4;
-      }
-      if (!best) {
-        score += 1;
-      }
+      const score = scoreSearchCandidate(title, rawTitle.replace(/\(\d{4}\)/, "").trim(), year, matchYear ? matchYear[1] : null);
       if (!best || score > best.score) {
         best = { href, score };
       }
     });
-    return best && best.score >= 1 ? best.href : null;
+    return best && best.score >= 5 ? best.href : null;
   });
 }
 function resolveTioPlusPlayer(result) {
@@ -1192,8 +1197,7 @@ function resolveOne(result) {
         return resolveDropload(result, url);
       }
       if (/mixdrop|mixdrp|mixdroop|m1xdrop/i.test(host)) {
-        console.log(`[WebstreamerLatino] Mixdrop skipped: ${result.url}`);
-        return [];
+        return resolveMixdrop(result, url);
       }
       if (/filelions|vidhide/i.test(host)) {
         return resolveFilelions(result, url);
@@ -1299,6 +1303,18 @@ function playerRank(player) {
       return 0;
   }
 }
+function extractCookieHeader(rawSetCookie) {
+  if (!rawSetCookie) {
+    return "";
+  }
+  const parts = String(rawSetCookie).split(/,(?=[^;,=\s]+=[^;,]+)/);
+  const cookies = parts.map((part) => part.trim().split(";")[0].trim()).filter(Boolean);
+  return uniqueBy(cookies, (cookie) => cookie.split("=")[0]).join("; ");
+}
+function mergeCookieHeaders(...values) {
+  const cookies = values.flatMap((value) => extractCookieHeader(value).split(/;\s*/)).filter(Boolean);
+  return uniqueBy(cookies, (cookie) => cookie.split("=")[0]).join("; ");
+}
 function validateDirectMedia(url, headers) {
   return __async(this, null, function* () {
     try {
@@ -1317,27 +1333,124 @@ function validateDirectMedia(url, headers) {
     }
   });
 }
+function resolveMixdrop(result, url) {
+  return __async(this, null, function* () {
+    var _a, _b, _c, _d, _e;
+    const normalized = new URL(url.href.replace("/f/", "/e/"));
+    const fileUrl = new URL(normalized.href.replace("/e/", "/f/"));
+    const baseHeaders = __spreadProps(__spreadValues({}, result.headers || {}), {
+      Referer: result.referer || normalized.origin
+    });
+    const embedPage = yield fetchPage(normalized.href, {
+      headers: __spreadProps(__spreadValues({}, baseHeaders), { Referer: fileUrl.href })
+    }).catch(() => null);
+    const filePage = embedPage ? null : yield fetchPage(fileUrl.href, { headers: baseHeaders }).catch(() => null);
+    const html = (embedPage == null ? void 0 : embedPage.text) || (filePage == null ? void 0 : filePage.text) || null;
+    let finalPageUrl = (embedPage == null ? void 0 : embedPage.url) || (filePage == null ? void 0 : filePage.url) || normalized.href;
+    let cookieHeader = mergeCookieHeaders(
+      (_a = result.headers) == null ? void 0 : _a.Cookie,
+      (_b = result.headers) == null ? void 0 : _b.cookie,
+      (_c = embedPage == null ? void 0 : embedPage.headers) == null ? void 0 : _c["set-cookie"],
+      (_d = filePage == null ? void 0 : filePage.headers) == null ? void 0 : _d["set-cookie"]
+    );
+    if (!html || /can't find the (file|video)/i.test(html)) {
+      console.log(`[WebstreamerLatino] Mixdrop miss: ${url.href}`);
+      return [];
+    }
+    let directValue = extractPackedUrl(html, [
+      /(?:MDCore|Core|MDp)\.wurl\s*=\s*"([^"]+)"/,
+      /(?:MDCore|Core|MDp)\.wurl\s*=\s*'([^']+)'/,
+      /wurl\s*=\s*"([^"]+)"/,
+      /wurl\s*=\s*'([^']+)'/,
+      /src:\s*"([^"]+)"/,
+      /src:\s*'([^']+)'/,
+      /(?:vsr|wurl)[^"'`]*["'`]((?:https?:)?\/\/[^"'`]+)["'`]/
+    ]);
+    if ((!directValue || /^\/e\//.test(directValue)) && (filePage == null ? void 0 : filePage.text)) {
+      const iframePath = extractPackedUrl(filePage.text, [
+        /<iframe[^>]+src="([^"]+)"/i,
+        /<iframe[^>]+src='([^']+)'/i
+      ]);
+      if (iframePath) {
+        const iframeUrl = absoluteUrl(iframePath, fileUrl.origin);
+        const nestedPage = yield fetchPage(iframeUrl, {
+          headers: __spreadProps(__spreadValues({}, baseHeaders), { Referer: fileUrl.href })
+        }).catch(() => null);
+        const nestedHtml = (nestedPage == null ? void 0 : nestedPage.text) || null;
+        if (nestedHtml) {
+          finalPageUrl = nestedPage.url || finalPageUrl;
+          cookieHeader = mergeCookieHeaders(cookieHeader, (_e = nestedPage.headers) == null ? void 0 : _e["set-cookie"]);
+          directValue = extractPackedUrl(nestedHtml, [
+            /(?:MDCore|Core|MDp)\.wurl\s*=\s*"([^"]+)"/,
+            /(?:MDCore|Core|MDp)\.wurl\s*=\s*'([^']+)'/,
+            /wurl\s*=\s*"([^"]+)"/,
+            /wurl\s*=\s*'([^']+)'/,
+            /src:\s*"([^"]+)"/,
+            /src:\s*'([^']+)'/,
+            /(?:vsr|wurl)[^"'`]*["'`]((?:https?:)?\/\/[^"'`]+)["'`]/
+          ]);
+        }
+      }
+    }
+    if (!directValue || /^\/e\//.test(directValue)) {
+      console.log(`[WebstreamerLatino] Mixdrop parse miss: ${url.href}`);
+      return [];
+    }
+    const directUrl = absoluteUrl(directValue, normalized.origin);
+    const page = import_cheerio_without_node_native2.default.load((filePage == null ? void 0 : filePage.text) || html);
+    const title = page(".title b").text().trim() || result.title;
+    const finalEmbedUrl = new URL(finalPageUrl);
+    const finalFileUrl = new URL(finalEmbedUrl.href.replace("/e/", "/f/"));
+    const streamHeaders = {
+      Referer: finalFileUrl.href,
+      Origin: finalEmbedUrl.origin
+    };
+    if (cookieHeader) {
+      streamHeaders.Cookie = cookieHeader;
+    }
+    const isPlayable = !SHOULD_VALIDATE_MEDIA || (yield validateDirectMedia(directUrl, streamHeaders));
+    if (!isPlayable) {
+      console.log(`[WebstreamerLatino] Mixdrop blocked: ${url.href}`);
+      return [];
+    }
+    return [buildStream(result, {
+      title,
+      url: directUrl,
+      quality: "Auto",
+      headers: streamHeaders,
+      player: "Mixdrop"
+    })];
+  });
+}
 function resolveFilelions(result, url) {
   return __async(this, null, function* () {
+    const normalized = new URL(
+      url.href.replace("/v/", "/f/").replace("/download/", "/f/").replace("/file/", "/f/")
+    );
     const headers = __spreadProps(__spreadValues({}, result.headers || {}), {
       Referer: result.referer || "https://ww1.cuevana3.is/"
     });
-    const page = yield fetchPage(url.href, { headers }).catch(() => null);
+    const page = yield fetchPage(normalized.href, { headers }).catch(() => null);
     if (!(page == null ? void 0 : page.text)) {
       console.log(`[WebstreamerLatino] FileLions miss: ${url.href}`);
       return [];
     }
     const unpacked = unpackPacker(page.text);
-    const linksMatch = unpacked.match(/var\s+links\s*=\s*\{[^}]*"hls2"\s*:\s*"([^"]+)"/i) || unpacked.match(/"hls2"\s*:\s*"([^"]+)"/i) || unpacked.match(/file:\s*"(https?:\/\/[^"]+\.m3u8[^"]*)"/i);
-    if (!linksMatch) {
+    const hls4Match = unpacked.match(/["']hls4["']\s*:\s*["']([^"']+)/i);
+    const hls3Match = unpacked.match(/["']hls3["']\s*:\s*["']([^"']+)/i);
+    const hls2Match = unpacked.match(/var\s+links\s*=\s*\{[^}]*["']hls2["']\s*:\s*["']([^"']+)/i) || unpacked.match(/["']hls2["']\s*:\s*["']([^"']+)/i);
+    const fileMatch = unpacked.match(/file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/i) || unpacked.match(/sources\s*:\s*\[\{\s*file\s*:\s*["']([^"']+)/i);
+    const playlistCandidate = (hls4Match == null ? void 0 : hls4Match[1]) || (hls3Match == null ? void 0 : hls3Match[1]) || (hls2Match == null ? void 0 : hls2Match[1]) || (fileMatch == null ? void 0 : fileMatch[1]);
+    if (!playlistCandidate) {
       console.log(`[WebstreamerLatino] FileLions parse miss: ${url.href}`);
       return [];
     }
-    const playlistUrl = linksMatch[1].replace(/\\\//g, "/");
+    const finalPageUrl = page.url || normalized.href;
+    const playlistUrl = absoluteUrl(playlistCandidate.replace(/\\\//g, "/"), finalPageUrl);
     const title = import_cheerio_without_node_native2.default.load(unpacked)('meta[name="description"]').attr("content") || result.title;
     const streamHeaders = {
-      Referer: page.url || url.href,
-      Origin: new URL(page.url || url.href).origin
+      Referer: finalPageUrl,
+      Origin: new URL(finalPageUrl).origin
     };
     return [buildStream(result, {
       title,
@@ -1512,13 +1625,17 @@ function resolveDoodStream(result, url) {
 function resolveDropload(result, url) {
   return __async(this, null, function* () {
     const normalized = url.href.replace("/d/", "/").replace("/e/", "/").replace("/embed-", "/");
-    const html = yield fetchText(normalized, { headers: result.headers });
-    if (/File Not Found|Pending in queue/i.test(html)) {
+    const html = yield fetchText(normalized, { headers: result.headers }).catch(() => null);
+    if (!html) {
+      console.log(`[WebstreamerLatino] Dropload miss: ${url.href}`);
+      return [];
+    }
+    if (/File Not Found|Pending in queue|no longer available|expired or has been deleted/i.test(html)) {
       console.log(`[WebstreamerLatino] Dropload miss: ${url.href}`);
       return [];
     }
     const unpacked = unpackPacker(html);
-    const fileMatch = unpacked.match(/sources:\[\{file:"(.*?)"/) || html.match(/sources:\[\{file:"(.*?)"/);
+    const fileMatch = unpacked.match(/sources\s*:\s*\[\{\s*file\s*:\s*["']([^"']+)/i) || html.match(/sources\s*:\s*\[\{\s*file\s*:\s*["']([^"']+)/i) || unpacked.match(/file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/i) || html.match(/file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/i);
     if (!fileMatch) {
       console.log(`[WebstreamerLatino] Dropload parse miss: ${url.href}`);
       return [];
@@ -1539,8 +1656,29 @@ function resolveDropload(result, url) {
 }
 function resolveStreamtape(result, url) {
   return __async(this, null, function* () {
-    const normalized = new URL(url.href.replace("/e/", "/v/"));
-    const html = yield fetchText(normalized.href, { headers: result.headers });
+    const candidates = uniqueBy([
+      url.href,
+      url.href.replace("/e/", "/v/"),
+      url.href.replace("/v/", "/e/")
+    ], (value) => value);
+    let html = null;
+    let finalUrl = null;
+    for (const candidate of candidates) {
+      const page2 = yield fetchText(candidate, { headers: result.headers }).catch(() => null);
+      if (!page2) {
+        continue;
+      }
+      if (/Video not found|Maybe it got deleted by the creator/i.test(page2)) {
+        continue;
+      }
+      html = page2;
+      finalUrl = candidate;
+      break;
+    }
+    if (!html) {
+      console.log(`[WebstreamerLatino] Streamtape miss: ${url.href}`);
+      return [];
+    }
     const directMatch = html.match(/'(\/\/streamtape\.com\/get_video[^']+)'/) || html.match(/"(\/\/streamtape\.com\/get_video[^"]+)"/);
     if (!directMatch) {
       console.log(`[WebstreamerLatino] Streamtape miss: ${url.href}`);
@@ -1552,6 +1690,7 @@ function resolveStreamtape(result, url) {
       title,
       url: `https:${directMatch[1]}`,
       quality: "720p",
+      headers: finalUrl ? { Referer: finalUrl } : void 0,
       player: "Streamtape"
     })];
   });
@@ -1590,17 +1729,35 @@ function resolveFastream(result, url) {
 }
 function resolveVidora(result, url) {
   return __async(this, null, function* () {
-    const normalized = url.href.replace("/embed/", "/");
-    const html = yield fetchText(normalized, { headers: result.headers });
+    const candidates = uniqueBy([
+      url.href.replace("/embed/", "/").replace("/f/", "/e/"),
+      url.href.replace("/embed/", "/"),
+      url.href
+    ], (value) => value);
+    let html = null;
+    let finalUrl = null;
+    for (const candidate of candidates) {
+      const page2 = yield fetchText(candidate, { headers: result.headers }).catch(() => null);
+      if (!page2) {
+        continue;
+      }
+      html = page2;
+      finalUrl = candidate;
+      break;
+    }
+    if (!html || !finalUrl) {
+      console.log(`[WebstreamerLatino] Vidora miss: ${url.href}`);
+      return [];
+    }
     const unpacked = unpackPacker(html);
-    const fileMatch = unpacked.match(/file:\s*"(.*?)"/) || unpacked.match(/file:\s*'(.*?)'/);
+    const fileMatch = unpacked.match(/file:\s*"(.*?)"/) || unpacked.match(/file:\s*'(.*?)'/) || html.match(/src:\s*['"](https?:\/\/[^'"]+\.m3u8[^'"]*)/i);
     if (!fileMatch) {
       console.log(`[WebstreamerLatino] Vidora miss: ${url.href}`);
       return [];
     }
     const page = import_cheerio_without_node_native2.default.load(html);
     const title = page("title").text().trim().replace(/^Watch /, "") || result.title;
-    const origin = new URL(normalized).origin;
+    const origin = new URL(finalUrl).origin;
     const height = yield guessHeightFromPlaylist(fileMatch[1], { Origin: origin });
     return [buildStream(result, {
       title,

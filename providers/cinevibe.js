@@ -383,6 +383,7 @@ function fetchStreams(tmdbId, mediaType, seasonNum, episodeNum, mediaInfo) {
                         name: `Cinevibe - ${quality}`,
                         title: mediaTitle,
                         url: source.url,
+                        type: source.url.includes('.m3u8') ? 'hls' : undefined,
                         quality: quality,
                         size: 'Unknown',
                         headers: WORKING_HEADERS,
@@ -438,4 +439,3 @@ if (typeof module !== 'undefined' && module.exports) {
     // For React Native environment
     global.CinevibeScraperModule = { getStreams };
 }
-

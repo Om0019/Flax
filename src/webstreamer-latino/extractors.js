@@ -93,8 +93,7 @@ async function resolveOne(result) {
     }
 
     if (/mixdrop|mixdrp|mixdroop|m1xdrop/i.test(host)) {
-      console.log(`[WebstreamerLatino] Mixdrop skipped: ${result.url}`);
-      return [];
+      return resolveMixdrop(result, url);
     }
 
     if (/filelions|vidhide/i.test(host)) {
@@ -342,32 +341,44 @@ async function resolveMixdrop(result, url) {
 }
 
 async function resolveFilelions(result, url) {
+  const normalized = new URL(
+    url.href
+      .replace('/v/', '/f/')
+      .replace('/download/', '/f/')
+      .replace('/file/', '/f/')
+  );
   const headers = {
     ...(result.headers || {}),
     Referer: result.referer || 'https://ww1.cuevana3.is/',
   };
-  const page = await fetchPage(url.href, { headers }).catch(() => null);
+  const page = await fetchPage(normalized.href, { headers }).catch(() => null);
   if (!page?.text) {
     console.log(`[WebstreamerLatino] FileLions miss: ${url.href}`);
     return [];
   }
 
   const unpacked = unpackPacker(page.text);
-  const linksMatch =
-    unpacked.match(/var\s+links\s*=\s*\{[^}]*"hls2"\s*:\s*"([^"]+)"/i) ||
-    unpacked.match(/"hls2"\s*:\s*"([^"]+)"/i) ||
-    unpacked.match(/file:\s*"(https?:\/\/[^"]+\.m3u8[^"]*)"/i);
+  const hls4Match = unpacked.match(/["']hls4["']\s*:\s*["']([^"']+)/i);
+  const hls3Match = unpacked.match(/["']hls3["']\s*:\s*["']([^"']+)/i);
+  const hls2Match =
+    unpacked.match(/var\s+links\s*=\s*\{[^}]*["']hls2["']\s*:\s*["']([^"']+)/i) ||
+    unpacked.match(/["']hls2["']\s*:\s*["']([^"']+)/i);
+  const fileMatch =
+    unpacked.match(/file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/i) ||
+    unpacked.match(/sources\s*:\s*\[\{\s*file\s*:\s*["']([^"']+)/i);
+  const playlistCandidate = hls4Match?.[1] || hls3Match?.[1] || hls2Match?.[1] || fileMatch?.[1];
 
-  if (!linksMatch) {
+  if (!playlistCandidate) {
     console.log(`[WebstreamerLatino] FileLions parse miss: ${url.href}`);
     return [];
   }
 
-  const playlistUrl = linksMatch[1].replace(/\\\//g, '/');
+  const finalPageUrl = page.url || normalized.href;
+  const playlistUrl = absoluteUrl(playlistCandidate.replace(/\\\//g, '/'), finalPageUrl);
   const title = cheerio.load(unpacked)('meta[name="description"]').attr('content') || result.title;
   const streamHeaders = {
-    Referer: page.url || url.href,
-    Origin: new URL(page.url || url.href).origin,
+    Referer: finalPageUrl,
+    Origin: new URL(finalPageUrl).origin,
   };
 
   return [buildStream(result, {
@@ -575,15 +586,24 @@ async function resolveDropload(result, url) {
     .replace('/d/', '/')
     .replace('/e/', '/')
     .replace('/embed-', '/');
-  const html = await fetchText(normalized, { headers: result.headers });
+  const html = await fetchText(normalized, { headers: result.headers }).catch(() => null);
 
-  if (/File Not Found|Pending in queue/i.test(html)) {
+  if (!html) {
+    console.log(`[WebstreamerLatino] Dropload miss: ${url.href}`);
+    return [];
+  }
+
+  if (/File Not Found|Pending in queue|no longer available|expired or has been deleted/i.test(html)) {
     console.log(`[WebstreamerLatino] Dropload miss: ${url.href}`);
     return [];
   }
 
   const unpacked = unpackPacker(html);
-  const fileMatch = unpacked.match(/sources:\[\{file:"(.*?)"/) || html.match(/sources:\[\{file:"(.*?)"/);
+  const fileMatch =
+    unpacked.match(/sources\s*:\s*\[\{\s*file\s*:\s*["']([^"']+)/i) ||
+    html.match(/sources\s*:\s*\[\{\s*file\s*:\s*["']([^"']+)/i) ||
+    unpacked.match(/file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/i) ||
+    html.match(/file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/i);
   if (!fileMatch) {
     console.log(`[WebstreamerLatino] Dropload parse miss: ${url.href}`);
     return [];
@@ -605,8 +625,33 @@ async function resolveDropload(result, url) {
 }
 
 async function resolveStreamtape(result, url) {
-  const normalized = new URL(url.href.replace('/e/', '/v/'));
-  const html = await fetchText(normalized.href, { headers: result.headers });
+  const candidates = uniqueBy([
+    url.href,
+    url.href.replace('/e/', '/v/'),
+    url.href.replace('/v/', '/e/'),
+  ], (value) => value);
+
+  let html = null;
+  let finalUrl = null;
+
+  for (const candidate of candidates) {
+    const page = await fetchText(candidate, { headers: result.headers }).catch(() => null);
+    if (!page) {
+      continue;
+    }
+    if (/Video not found|Maybe it got deleted by the creator/i.test(page)) {
+      continue;
+    }
+    html = page;
+    finalUrl = candidate;
+    break;
+  }
+
+  if (!html) {
+    console.log(`[WebstreamerLatino] Streamtape miss: ${url.href}`);
+    return [];
+  }
+
   const directMatch = html.match(/'(\/\/streamtape\.com\/get_video[^']+)'/) || html.match(/"(\/\/streamtape\.com\/get_video[^"]+)"/);
 
   if (!directMatch) {
@@ -621,6 +666,7 @@ async function resolveStreamtape(result, url) {
     title,
     url: `https:${directMatch[1]}`,
     quality: '720p',
+    headers: finalUrl ? { Referer: finalUrl } : undefined,
     player: 'Streamtape',
   })];
 }
@@ -662,10 +708,35 @@ async function resolveFastream(result, url) {
 }
 
 async function resolveVidora(result, url) {
-  const normalized = url.href.replace('/embed/', '/');
-  const html = await fetchText(normalized, { headers: result.headers });
+  const candidates = uniqueBy([
+    url.href.replace('/embed/', '/').replace('/f/', '/e/'),
+    url.href.replace('/embed/', '/'),
+    url.href,
+  ], (value) => value);
+
+  let html = null;
+  let finalUrl = null;
+
+  for (const candidate of candidates) {
+    const page = await fetchText(candidate, { headers: result.headers }).catch(() => null);
+    if (!page) {
+      continue;
+    }
+    html = page;
+    finalUrl = candidate;
+    break;
+  }
+
+  if (!html || !finalUrl) {
+    console.log(`[WebstreamerLatino] Vidora miss: ${url.href}`);
+    return [];
+  }
+
   const unpacked = unpackPacker(html);
-  const fileMatch = unpacked.match(/file:\s*"(.*?)"/) || unpacked.match(/file:\s*'(.*?)'/);
+  const fileMatch =
+    unpacked.match(/file:\s*"(.*?)"/) ||
+    unpacked.match(/file:\s*'(.*?)'/) ||
+    html.match(/src:\s*['"](https?:\/\/[^'"]+\.m3u8[^'"]*)/i);
   if (!fileMatch) {
     console.log(`[WebstreamerLatino] Vidora miss: ${url.href}`);
     return [];
@@ -673,7 +744,7 @@ async function resolveVidora(result, url) {
 
   const page = cheerio.load(html);
   const title = page('title').text().trim().replace(/^Watch /, '') || result.title;
-  const origin = new URL(normalized).origin;
+  const origin = new URL(finalUrl).origin;
   const height = await guessHeightFromPlaylist(fileMatch[1], { Origin: origin });
 
   return [buildStream(result, {

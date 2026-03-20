@@ -181,6 +181,7 @@ function fetchAndParseM3U8(playlistUrl, mediaInfo) {
         name: "Vidlink",
         title: mediaInfo.title,
         url: playlistUrl,
+        type: "hls",
         quality: "Auto",
         size: "Unknown",
         headers: VIDLINK_HEADERS,
@@ -192,6 +193,7 @@ function fetchAndParseM3U8(playlistUrl, mediaInfo) {
         name: "Vidlink",
         title: mediaInfo.title,
         url: playlistUrl,
+        type: "hls",
         quality: "Auto",
         size: "Unknown",
         headers: VIDLINK_HEADERS,
@@ -261,6 +263,7 @@ function processVidlinkResponse(data, mediaInfo) {
         streams.push({
           _isPlaylist: true,
           url: data.stream.playlist,
+          type: "hls",
           mediaInfo: __spreadProps(__spreadValues({}, mediaInfo), { title: streamTitle })
         });
       } else {
@@ -282,11 +285,12 @@ function processVidlinkResponse(data, mediaInfo) {
       }
     } else if (data.stream && data.stream.playlist && !data.stream.qualities) {
       console.log(`[Vidlink] Processing playlist-only response`);
-      streams.push({
-        _isPlaylist: true,
-        url: data.stream.playlist,
-        mediaInfo: __spreadProps(__spreadValues({}, mediaInfo), { title: streamTitle })
-      });
+        streams.push({
+          _isPlaylist: true,
+          url: data.stream.playlist,
+          type: "hls",
+          mediaInfo: __spreadProps(__spreadValues({}, mediaInfo), { title: streamTitle })
+        });
     } else if (data.url) {
       const quality = extractQuality(data);
       streams.push({
@@ -340,6 +344,7 @@ function processVidlinkResponse(data, mediaInfo) {
               name: `Vidlink ${key} - ${quality}`,
               title: streamTitle,
               url: value,
+              type: value.includes(".m3u8") ? "hls" : void 0,
               quality,
               size: "Unknown",
               headers: VIDLINK_HEADERS,

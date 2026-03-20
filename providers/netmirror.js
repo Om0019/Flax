@@ -45,6 +45,46 @@ function makeRequest(url, options = {}) {
 function getUnixTime() {
   return Math.floor(Date.now() / 1e3);
 }
+function normalizeTitle(value) {
+  return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
+}
+function extractYear(value) {
+  const match = String(value || "").match(/\b(19|20)\d{2}\b/);
+  return match ? match[0] : null;
+}
+function scoreSearchResult(resultTitle, targetTitle, expectedYear) {
+  const normalizedResult = normalizeTitle(resultTitle);
+  const normalizedTarget = normalizeTitle(targetTitle);
+  if (!normalizedResult || !normalizedTarget) {
+    return -999;
+  }
+  let score = 0;
+  if (normalizedResult === normalizedTarget) {
+    score += 10;
+  } else if (normalizedResult.startsWith(`${normalizedTarget} `) || normalizedTarget.startsWith(`${normalizedResult} `)) {
+    score += 8;
+  } else if (normalizedResult.includes(normalizedTarget) || normalizedTarget.includes(normalizedResult)) {
+    score += 5;
+  }
+  const resultWords = new Set(normalizedResult.split(" ").filter(Boolean));
+  const targetWords = normalizedTarget.split(" ").filter(Boolean);
+  const matchedWords = targetWords.filter((word) => resultWords.has(word)).length;
+  if (targetWords.length > 0) {
+    score += matchedWords / targetWords.length;
+  }
+  const resultYear = extractYear(resultTitle);
+  if (expectedYear && resultYear) {
+    if (resultYear === expectedYear) {
+      score += 4;
+    } else {
+      score -= 3;
+    }
+  }
+  if (/\bseason\b|\bs\d+\b|\bepisode\b|\be\d+\b/i.test(resultTitle)) {
+    score -= 2;
+  }
+  return score;
+}
 function bypass() {
   const now = Date.now();
   if (globalCookie && cookieTimestamp && now - cookieTimestamp < COOKIE_EXPIRY) {
@@ -439,39 +479,11 @@ function getStreams(tmdbId, mediaType = "movie", seasonNum = null, episodeNum = 
       platforms = ["primevideo", "netflix", "disney"];
     }
     console.log(`[NetMirror] Will try search queries: "${title}" and "${title} ${year}"`);
-    function calculateSimilarity(str1, str2) {
-      const s1 = str1.toLowerCase().trim();
-      const s2 = str2.toLowerCase().trim();
-      if (s1 === s2)
-        return 1;
-      const words1 = s1.split(/\s+/).filter((w) => w.length > 0);
-      const words2 = s2.split(/\s+/).filter((w) => w.length > 0);
-      if (words2.length <= words1.length) {
-        let exactMatches = 0;
-        for (const queryWord of words2) {
-          if (words1.includes(queryWord)) {
-            exactMatches++;
-          }
-        }
-        if (exactMatches === words2.length) {
-          return 0.95 * (exactMatches / words1.length);
-        }
-      }
-      if (s1.startsWith(s2)) {
-        return 0.9;
-      }
-      return 0;
-    }
-    function filterRelevantResults(searchResults, query) {
-      const filtered = searchResults.filter((result) => {
-        const similarity = calculateSimilarity(result.title, query);
-        return similarity >= 0.7;
-      });
-      return filtered.sort((a, b) => {
-        const simA = calculateSimilarity(a.title, query);
-        const simB = calculateSimilarity(b.title, query);
-        return simB - simA;
-      });
+    function filterRelevantResults(searchResults, query, expectedYear) {
+      return searchResults.map((result) => ({
+        result,
+        score: scoreSearchResult(result.title, query, expectedYear)
+      })).filter(({ score }) => score >= 5).sort((a, b) => b.score - a.score).map(({ result }) => result);
     }
     function tryPlatform(platformIndex) {
       if (platformIndex >= platforms.length) {
@@ -491,7 +503,7 @@ function getStreams(tmdbId, mediaType = "movie", seasonNum = null, episodeNum = 
             }
             return null;
           }
-          const relevantResults = filterRelevantResults(searchResults, title);
+          const relevantResults = filterRelevantResults(searchResults, title, year);
           if (relevantResults.length === 0) {
             console.log(`[NetMirror] Found ${searchResults.length} results but none were relevant enough`);
             if (!withYear && year) {

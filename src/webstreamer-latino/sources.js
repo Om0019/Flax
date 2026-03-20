@@ -18,6 +18,34 @@ function buildTitle(tmdb, season, episode) {
   return tmdb.year ? `${tmdb.title} (${tmdb.year})` : tmdb.title;
 }
 
+function scoreSearchCandidate(targetTitle, rawTitle, expectedYear, matchedYear) {
+  const targetNorm = normalizeTitle(targetTitle);
+  const rawNorm = normalizeTitle(rawTitle);
+  let score = 0;
+
+  if (!targetNorm || !rawNorm) {
+    return score;
+  }
+
+  if (rawNorm === targetNorm) {
+    score += 10;
+  } else if (rawNorm.includes(targetNorm) || targetNorm.includes(rawNorm)) {
+    score += 5;
+  }
+
+  if (expectedYear && matchedYear) {
+    if (matchedYear === expectedYear) {
+      score += 4;
+    } else {
+      score -= 3;
+    }
+  } else if (!expectedYear && matchedYear) {
+    score += 1;
+  }
+
+  return score;
+}
+
 export async function getLatinoSourceResults(tmdb, mediaType, season, episode) {
   const disabled = new Set(
     String(process.env.WEBSTREAMER_LATINO_DISABLED_SOURCES || '')
@@ -820,7 +848,6 @@ async function findTioPlusMovie(title, year) {
   }
 
   const $ = cheerio.load(`<div>${html}</div>`);
-  const targetNorm = normalizeTitle(title);
   let best = null;
 
   $('a.itemA[href]').each((_, el) => {
@@ -831,34 +858,15 @@ async function findTioPlusMovie(title, year) {
       return;
     }
 
-    let score = 0;
-    const norm = normalizeTitle(rawTitle.replace(/\(\d{4}\)/, '').trim());
-    if (norm === targetNorm) {
-      score += 10;
-    }
-    if (norm.includes(targetNorm) || targetNorm.includes(norm)) {
-      score += 5;
-    }
-
     const matchYear = rawTitle.match(/\((\d{4})\)/);
-    if (year && matchYear && matchYear[1] === year) {
-      score += 4;
-    }
-
-    if (!year && matchYear) {
-      score += 1;
-    }
-
-    if (!best) {
-      score += 1;
-    }
+    const score = scoreSearchCandidate(title, rawTitle.replace(/\(\d{4}\)/, '').trim(), year, matchYear ? matchYear[1] : null);
 
     if (!best || score > best.score) {
       best = { href, score };
     }
   });
 
-  return best && best.score >= 1 ? best.href : null;
+  return best && best.score >= 5 ? best.href : null;
 }
 
 async function findTioPlusSeries(title, year) {
@@ -876,7 +884,6 @@ async function findTioPlusSeries(title, year) {
   }
 
   const $ = cheerio.load(`<div>${html}</div>`);
-  const targetNorm = normalizeTitle(title);
   let best = null;
 
   $('a.itemA[href]').each((_, el) => {
@@ -887,30 +894,15 @@ async function findTioPlusSeries(title, year) {
       return;
     }
 
-    let score = 0;
-    const norm = normalizeTitle(rawTitle.replace(/\(\d{4}\)/, '').trim());
-    if (norm === targetNorm) {
-      score += 10;
-    }
-    if (norm.includes(targetNorm) || targetNorm.includes(norm)) {
-      score += 5;
-    }
-
     const matchYear = rawTitle.match(/\((\d{4})\)/);
-    if (year && matchYear && matchYear[1] === year) {
-      score += 4;
-    }
-
-    if (!best) {
-      score += 1;
-    }
+    const score = scoreSearchCandidate(title, rawTitle.replace(/\(\d{4}\)/, '').trim(), year, matchYear ? matchYear[1] : null);
 
     if (!best || score > best.score) {
       best = { href, score };
     }
   });
 
-  return best && best.score >= 1 ? best.href : null;
+  return best && best.score >= 5 ? best.href : null;
 }
 
 async function resolveTioPlusPlayer(result) {

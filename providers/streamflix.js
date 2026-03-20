@@ -133,7 +133,7 @@ function findBestMatch(targetTitle, results) {
   }
 
   console.log(`[StreamFlix] Best match: "${bestMatch?.moviename}" (score: ${bestScore.toFixed(2)})`);
-  return bestMatch;
+  return bestScore >= 0.75 ? bestMatch : null;
 }
 
 // Calculate string similarity

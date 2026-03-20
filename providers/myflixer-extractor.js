@@ -281,7 +281,8 @@ class MyFlixerExtractor {
           });
         }
         if (!selectedResult) {
-          selectedResult = searchResults[0];
+          console.log("No suitable title match found");
+          return [];
         }
         console.log(`Selected: ${selectedResult.title}`);
         const contentDetails = yield this.getContentDetails(selectedResult.url);
