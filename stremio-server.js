@@ -635,6 +635,7 @@ const LATINO_RETRY_PLAYERS = new Set([
     'streamwish',
     'voe',
 ]);
+const SLOW_PLAYBACK_HOST_PATTERNS = /(filelions|vidhide|emturbovid|goodstream|vimeos|fastream|streamwish|voe|technicaldocumentation\.site|acek-cdn\.com|ovaltinecdn\.com|orbitcache\.com)/i;
 
 function forwardedProto(req) {
     if (!req || !req.headers) {
@@ -753,6 +754,18 @@ function mediaflowProxyWrap(req, url, headers, extraParams = {}, stream = null) 
         ? `/proxy/hls/manifest.m3u8?url=${encodedUrl}&headers=${encodedHeaders}${extraQuery ? `&${extraQuery}` : ''}`
         : `/proxy?url=${encodedUrl}&headers=${encodedHeaders}${extraQuery ? `&${extraQuery}` : ''}`;
     return base ? `${base}${proxyPath}` : proxyPath;
+}
+
+function playbackProxyTimeoutMs(url, stream = null) {
+    if (isLikelyHlsUrl(url, stream)) {
+        return 30000;
+    }
+
+    if (SLOW_PLAYBACK_HOST_PATTERNS.test(String(url || ''))) {
+        return 30000;
+    }
+
+    return 10000;
 }
 
 function extractorWrap(req, host, targetUrl, headers = {}, extraParams = {}) {
@@ -1586,13 +1599,14 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
                 ...(req.headers.range ? { Range: req.headers.range } : {}),
                 ...(req.headers.accept ? { Accept: req.headers.accept } : {}),
             };
+            const upstreamTimeout = playbackProxyTimeoutMs(targetUrl);
 
             const resp = await axios({
                 method: upstreamMethod,
                 url: targetUrl,
                 headers: upstreamHeaders,
                 responseType: 'stream',
-                timeout: 10000,
+                timeout: upstreamTimeout,
                 validateStatus: () => true
             });
 
