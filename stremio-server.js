@@ -814,6 +814,36 @@ function normalizeProxyTarget(rawUrl, headers = {}) {
     return rawUrl;
 }
 
+function shouldMarkMexicanFlag(stream) {
+    if (!stream) {
+        return false;
+    }
+
+    const provider = String(stream.provider || '').toLowerCase();
+    if (provider === 'webstreamer-latino') {
+        return true;
+    }
+
+    const language = String(stream.language || stream.contentLanguage || '').toLowerCase();
+    if (language.includes('latino') || language.includes('es-mx') || language.includes('spa-lat')) {
+        return true;
+    }
+
+    const combined = `${stream.name || ''} ${stream.title || ''}`.toLowerCase();
+    return /\blatino\b/.test(combined) || /\bes[-_ ]?mx\b/.test(combined);
+}
+
+function decorateStreamTitle(stream) {
+    const title = String(stream?.title || 'Stream');
+    if (!shouldMarkMexicanFlag(stream)) {
+        return title;
+    }
+    if (title.includes('🇲🇽')) {
+        return title;
+    }
+    return `🇲🇽 ${title}`;
+}
+
 async function canResolveHost(hostname) {
     if (!hostname) {
         return false;
@@ -1188,7 +1218,7 @@ builder.defineStreamHandler(async ({ type, id }) => {
 
             return {
                 name: s.name || "Source",
-                title: s.title || "Stream",
+                title: decorateStreamTitle(s),
                 url: proxiedUrl,
                 subtitles: s.subtitles || [],
                 behaviorHints: {
