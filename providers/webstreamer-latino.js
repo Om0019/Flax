@@ -1888,8 +1888,12 @@ function resolveGoodstream(result, url) {
     const playlistUrl = fileMatch[1].replace(/\\\//g, "/");
     const cookieHeader = extractInlineCookieHeader(html);
     const streamHeaders = buildPlaybackHeaders(pageUrl, __spreadValues({
-      "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-      Accept: "*/*"
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      Accept: "*/*",
+      "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+      "sec-ch-ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+      "sec-ch-ua-mobile": "?0",
+      "sec-ch-ua-platform": '"Windows"'
     }, cookieHeader ? { Cookie: cookieHeader } : {}));
     const viewMatch = html.match(/\/dl\?op=view&view_id=(\d+)&hash=([a-z0-9-]+)/i);
     if (viewMatch) {
@@ -1925,12 +1929,21 @@ ${unpacked}`;
     }
     const playlistUrl = (fileMatch[1] || fileMatch[0]).replace(/\\\//g, "/");
     const posterMatch = body.match(/image:"([^"]+)"/i);
-    const height = yield guessHeightFromPlaylist(playlistUrl, { Referer: url.href }).catch(() => null);
+    const streamHeaders = buildPlaybackHeaders(url.href, {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      Accept: "*/*"
+    });
+    const viewMatch = body.match(/\/dl\?op=view&view_id=(\d+)&hash=([a-z0-9-]+)/i);
+    if (viewMatch) {
+      const beaconUrl = new URL(`/dl?op=view&view_id=${viewMatch[1]}&hash=${viewMatch[2]}&adb=0`, url.origin).href;
+      yield fetchText(beaconUrl, { headers: streamHeaders }).catch(() => null);
+    }
+    const height = yield guessHeightFromPlaylist(playlistUrl, streamHeaders).catch(() => null);
     return [buildStream(result, {
       title: posterMatch ? result.title : result.title,
       url: playlistUrl,
       quality: height ? `${height}p` : "Auto",
-      headers: { Referer: url.href },
+      headers: streamHeaders,
       player: "Vimeos"
     })];
   });
