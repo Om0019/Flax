@@ -1001,7 +1001,7 @@ async function pruneDeadHlsVariants(playlistText, baseUrl) {
 }
 
 function shouldBypassLatinoNestedProxy(baseUrl) {
-    return /(turboviplay|turbovidhls|emturbovid|goodstream|vimeos|fastream|filelions|vidhide)/i.test(String(baseUrl || ''));
+    return /(turboviplay|turbovidhls|emturbovid|fastream)/i.test(String(baseUrl || ''));
 }
 
 async function filterReachableHlsVariants(playlistText, baseUrl) {
