@@ -1380,7 +1380,10 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
                         const eheaders = encodeURIComponent(JSON.stringify(headers));
                         const sidPart = sessionId ? `&sid=${encodeURIComponent(sessionId)}` : '';
                         const prefix = requestBase(req);
-                        return prefix ? `${prefix}/proxy?url=${eurl}&headers=${eheaders}${sidPart}` : `/proxy?url=${eurl}&headers=${eheaders}${sidPart}`;
+                        const proxyPath = isLikelyHlsUrl(urlToProxy)
+                            ? `/proxy/hls/manifest.m3u8?url=${eurl}&headers=${eheaders}${sidPart}`
+                            : `/proxy?url=${eurl}&headers=${eheaders}${sidPart}`;
+                        return prefix ? `${prefix}${proxyPath}` : proxyPath;
                     };
 
                     // rewrite playlist lines: segment URLs plus URI attributes inside HLS tags
