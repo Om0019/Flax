@@ -1,6 +1,6 @@
 /**
  * hdhub4u - Built from src/hdhub4u/
- * Generated: 2026-03-20T02:10:55.357Z
+ * Generated: 2026-03-20T02:35:26.494Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -727,11 +727,8 @@ function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) 
       const searchResults = yield search(searchQuery);
       if (searchResults.length === 0)
         return [];
-      const selectedMedia = findBestTitleMatch(mediaInfo, searchResults, mediaType, season);
-      if (!selectedMedia) {
-        console.log(`[HDHub4u] No suitable title match found for "${mediaInfo.title}" (${mediaInfo.year || "N/A"})`);
-        return [];
-      }
+      const bestMatch = findBestTitleMatch(mediaInfo, searchResults, mediaType, season);
+      const selectedMedia = bestMatch || searchResults[0];
       console.log(`[HDHub4u] Selected: "${selectedMedia.title}" (${selectedMedia.url})`);
       const result = yield getDownloadLinks(selectedMedia.url);
       const finalLinks = result.finalLinks;

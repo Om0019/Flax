@@ -9,6 +9,21 @@ function absoluteUrl(rawUrl, origin) {
   return new URL(rawUrl.replace(/^\/\//, 'https://'), origin).href;
 }
 
+function buildPlaybackHeaders(pageUrl, extra = {}) {
+  const finalPageUrl = String(pageUrl || '');
+  let origin = '';
+
+  try {
+    origin = new URL(finalPageUrl).origin;
+  } catch (_error) {}
+
+  return {
+    ...(origin ? { Origin: origin } : {}),
+    ...(finalPageUrl ? { Referer: finalPageUrl } : {}),
+    ...extra,
+  };
+}
+
 function buildStream(result, extracted) {
   const quality = extracted.quality || parseQuality(extracted.title || extracted.url);
   const player = extracted.player || result.player || inferPlayerFromUrl(extracted.url || result.url);
@@ -376,10 +391,7 @@ async function resolveFilelions(result, url) {
   const finalPageUrl = page.url || normalized.href;
   const playlistUrl = absoluteUrl(playlistCandidate.replace(/\\\//g, '/'), finalPageUrl);
   const title = cheerio.load(unpacked)('meta[name="description"]').attr('content') || result.title;
-  const streamHeaders = {
-    Referer: finalPageUrl,
-    Origin: new URL(finalPageUrl).origin,
-  };
+  const streamHeaders = buildPlaybackHeaders(finalPageUrl);
 
   return [buildStream(result, {
     title,
@@ -413,10 +425,7 @@ async function resolveEmturbovid(result, url) {
 
   const playlistUrl = playlistMatch[1].replace(/\\\//g, '/');
   const title = cheerio.load(html)('title').text().trim() || result.title;
-  const streamHeaders = {
-    Referer: page.url || url.href,
-    Origin: new URL(page.url || url.href).origin,
-  };
+  const streamHeaders = buildPlaybackHeaders(page.url || url.href);
 
   return [buildStream(result, {
     title,
@@ -744,14 +753,14 @@ async function resolveVidora(result, url) {
 
   const page = cheerio.load(html);
   const title = page('title').text().trim().replace(/^Watch /, '') || result.title;
-  const origin = new URL(finalUrl).origin;
-  const height = await guessHeightFromPlaylist(fileMatch[1], { Origin: origin });
+  const streamHeaders = buildPlaybackHeaders(finalUrl);
+  const height = await guessHeightFromPlaylist(fileMatch[1], streamHeaders);
 
   return [buildStream(result, {
     title,
     url: fileMatch[1],
     quality: height ? `${height}p` : 'Auto',
-    headers: { Origin: origin },
+    headers: streamHeaders,
     player: 'Vidora',
   })];
 }

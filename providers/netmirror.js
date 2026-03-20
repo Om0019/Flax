@@ -479,6 +479,16 @@ function getStreams(tmdbId, mediaType = "movie", seasonNum = null, episodeNum = 
       platforms = ["primevideo", "netflix", "disney"];
     }
     console.log(`[NetMirror] Will try search queries: "${title} ${year}" and "${title}"`);
+    function isAcceptableContentMatch(contentData) {
+      if (!contentData) {
+        return false;
+      }
+      if (mediaType === "movie" && year && contentData.year && String(contentData.year) !== String(year)) {
+        console.log(`[NetMirror] Rejecting loaded content due to year mismatch: got ${contentData.year}, expected ${year}`);
+        return false;
+      }
+      return true;
+    }
     function filterRelevantResults(searchResults, query, expectedYear) {
       return searchResults.map((result) => ({
         result,
@@ -512,9 +522,20 @@ function getStreams(tmdbId, mediaType = "movie", seasonNum = null, episodeNum = 
             }
             return null;
           }
-          const selectedContent = relevantResults[0];
-          console.log(`[NetMirror] Selected: ${selectedContent.title} (ID: ${selectedContent.id}) - filtered from ${searchResults.length} results`);
-          return loadContent(selectedContent.id, platform).then(function(contentData) {
+          function tryRelevantResult(index) {
+            if (index >= relevantResults.length) {
+              if (withYear && year) {
+                console.log(`[NetMirror] No year-verified result found, trying title-only fallback...`);
+                return trySearch(false);
+              }
+              return null;
+            }
+            const selectedContent = relevantResults[index];
+            console.log(`[NetMirror] Selected: ${selectedContent.title} (ID: ${selectedContent.id}) - filtered from ${searchResults.length} results`);
+            return loadContent(selectedContent.id, platform).then(function(contentData) {
+            if (!isAcceptableContentMatch(contentData)) {
+              return tryRelevantResult(index + 1);
+            }
             let targetContentId = selectedContent.id;
             let episodeData = null;
             if (mediaType === "tv" && !contentData.isMovie) {
@@ -623,6 +644,8 @@ function getStreams(tmdbId, mediaType = "movie", seasonNum = null, episodeNum = 
               return adaptiveStream ? [adaptiveStream] : [];
             });
           });
+          }
+          return tryRelevantResult(0);
         });
       }
       return trySearch(Boolean(year)).then(function(result) {
