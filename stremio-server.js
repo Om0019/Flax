@@ -623,7 +623,6 @@ let latinoMediaflowModulePromise = null;
 const LATINO_ON_DEMAND_PLAYERS = new Set([
     'filelions',
     'emturbovid',
-    'goodstream',
     'fastream',
     'vimeos',
     'streamwish',
