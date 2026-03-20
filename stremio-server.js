@@ -705,12 +705,59 @@ function isLikelyHlsUrl(url, stream = null) {
     return false;
 }
 
-function mediaflowProxyWrap(req, url, headers) {
+function mediaflowProxyWrap(req, url, headers, extraParams = {}) {
     const encodedUrl = encodeURIComponent(url);
     const encodedHeaders = encodeURIComponent(JSON.stringify(headers || {}));
+    const extraQuery = Object.entries(extraParams)
+        .filter(([, value]) => value != null && value !== '')
+        .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`)
+        .join('&');
     const base = requestBase(req);
-    const proxyPath = `/proxy/hls/manifest.m3u8?url=${encodedUrl}&headers=${encodedHeaders}`;
+    const proxyPath = `/proxy/hls/manifest.m3u8?url=${encodedUrl}&headers=${encodedHeaders}${extraQuery ? `&${extraQuery}` : ''}`;
     return base ? `${base}${proxyPath}` : proxyPath;
+}
+
+function extractorWrap(req, host, targetUrl, headers = {}, extraParams = {}) {
+    const base = requestBase(req);
+    const query = new URLSearchParams({
+        host,
+        d: targetUrl,
+        ...Object.fromEntries(
+            Object.entries(extraParams)
+                .filter(([, value]) => value != null && value !== '')
+                .map(([key, value]) => [key, String(value)])
+        ),
+    });
+
+    Object.entries(headers || {}).forEach(([key, value]) => {
+        if (value == null || value === '') {
+            return;
+        }
+        query.set(`h_${String(key).replace(/-/g, '_')}`, String(value));
+    });
+
+    const path = `/extractor/video?${query.toString()}`;
+    return base ? `${base}${path}` : path;
+}
+
+function shouldResolveLatinoOnDemand(stream) {
+    if (!stream || String(stream.provider || '').toLowerCase() !== 'webstreamer-latino') {
+        return false;
+    }
+
+    if (!stream.extractorTarget || !stream.player) {
+        return false;
+    }
+
+    return [
+        'filelions',
+        'emturbovid',
+        'goodstream',
+        'fastream',
+        'vimeos',
+        'streamwish',
+        'voe',
+    ].includes(String(stream.player).toLowerCase());
 }
 
 function normalizeProxyTarget(rawUrl, headers = {}) {
@@ -786,6 +833,14 @@ async function pruneDeadHlsVariants(playlistText, baseUrl) {
 
         variantChecks.push({ idx: i, hostname });
         i += 1;
+    }
+
+    // If the master playlist only exposes a single variant, keep it even when
+    // DNS probing fails locally. Some hosts serve valid playlists on CDNs that
+    // are not resolvable from the server environment, and pruning the sole
+    // variant leaves clients with a malformed two-line manifest.
+    if (variantChecks.length <= 1) {
+        return playlistText;
     }
 
     const okByIdx = new Map();
@@ -998,9 +1053,17 @@ builder.defineStreamHandler(async ({ type, id }) => {
                 // vixsrc often returns playlist URLs without .m3u8 extension
                 || providerLower === 'vixsrc'
                 || nameLower.includes('vixsrc');
-            const proxiedUrl = isHls
-                ? proxyWrapHls(s.url, finalHeaders, { sid: playbackSession.id })
-                : proxyWrap(s.url, finalHeaders, { sid: playbackSession.id });
+            const proxiedUrl = shouldResolveLatinoOnDemand(s)
+                ? extractorWrap(
+                    null,
+                    s.player,
+                    s.extractorTarget,
+                    s.extractorHeaders || providerHeaders,
+                    { redirect_stream: 'true', sid: playbackSession.id }
+                )
+                : (isHls
+                    ? proxyWrapHls(s.url, finalHeaders, { sid: playbackSession.id })
+                    : proxyWrap(s.url, finalHeaders, { sid: playbackSession.id }));
 
             return {
                 name: s.name || "Source",
@@ -1444,7 +1507,8 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
                 return res.status(404).json({ error: 'extractor could not resolve stream' });
             }
 
-            const proxyUrl = mediaflowProxyWrap(req, stream.url, stream.headers || headers);
+            const sid = req.query.sid ? String(req.query.sid) : '';
+            const proxyUrl = mediaflowProxyWrap(req, stream.url, stream.headers || headers, sid ? { sid } : {});
 
             if (String(req.query.redirect_stream || '').toLowerCase() === 'true') {
                 return res.redirect(proxyUrl);

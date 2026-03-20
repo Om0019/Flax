@@ -1,6 +1,6 @@
 /**
  * webstreamer-latino - Built from src/webstreamer-latino/
- * Generated: 2026-03-20T05:32:01.810Z
+ * Generated: 2026-03-20T05:58:27.019Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -1136,6 +1136,8 @@ function buildStream(result, extracted) {
     source: result.source,
     language: result.language,
     player,
+    extractorTarget: result.url,
+    extractorHeaders: result.headers || {},
     qualityRank: qualityRank(quality)
   };
 }

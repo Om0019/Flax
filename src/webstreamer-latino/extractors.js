@@ -147,6 +147,8 @@ function buildStream(result, extracted) {
     source: result.source,
     language: result.language,
     player,
+    extractorTarget: result.url,
+    extractorHeaders: result.headers || {},
     qualityRank: qualityRank(quality),
   };
 }
