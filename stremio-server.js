@@ -1267,6 +1267,7 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
             return res.status(503).send('server paused');
         }
         const sessionId = req.query.sid ? String(req.query.sid) : '';
+        const upstreamMethod = String(req.method || 'GET').toUpperCase() === 'HEAD' ? 'HEAD' : 'GET';
         if (sessionId) {
             touchPlaybackSession(sessionId);
         }
@@ -1302,7 +1303,9 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
                 ...(req.headers.accept ? { Accept: req.headers.accept } : {}),
             };
 
-            const resp = await axios.get(targetUrl, {
+            const resp = await axios({
+                method: upstreamMethod,
+                url: targetUrl,
                 headers: upstreamHeaders,
                 responseType: 'stream',
                 timeout: 10000,
@@ -1327,14 +1330,13 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
                 }
             }
 
-            // copy status and headers, but drop hop-by-hop / body-size headers
-            // that become invalid once we rewrite playlist bodies.
+            // copy upstream headers. We only strip hop-by-hop headers here.
+            // body-size headers are preserved for direct file streams because
+            // ExoPlayer uses them for range/seeking behavior.
             res.status(resp.status);
             Object.entries(resp.headers).forEach(([k, v]) => {
                 const key = String(k).toLowerCase();
                 if ([
-                    'content-length',
-                    'content-encoding',
                     'transfer-encoding',
                     'connection',
                     'keep-alive',
@@ -1346,6 +1348,9 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
 
             const contentType = (resp.headers['content-type'] || '').toLowerCase();
             const isPlaylist = contentType.includes('mpegurl') || isLikelyHlsUrl(targetUrl);
+            if (upstreamMethod === 'HEAD') {
+                return res.end();
+            }
             if (isPlaylist) {
                 let data = '';
                 resp.data.on('data', chunk => data += chunk.toString());
@@ -1393,6 +1398,8 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
 
                     res.setHeader('content-type', 'application/vnd.apple.mpegurl');
                     res.removeHeader('content-length');
+                    res.removeHeader('content-encoding');
+                    res.removeHeader('transfer-encoding');
                     res.send(rewritten);
                 });
             } else {
@@ -1405,7 +1412,9 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
     };
 
     app.get('/proxy', proxyHandler);
+    app.head('/proxy', proxyHandler);
     app.get('/proxy/hls/manifest.m3u8', proxyHandler);
+    app.head('/proxy/hls/manifest.m3u8', proxyHandler);
 
     app.get('/extractor/video', async (req, res) => {
         if (serverIsBlockingStreams()) {

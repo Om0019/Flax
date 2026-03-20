@@ -108,47 +108,52 @@ async function prewarmSource(baseUrl) {
 }
 
 async function searchCuevana(tmdb, season, episode) {
-  const searchTerm = tmdb.title || tmdb.originalTitle;
-  if (!searchTerm) {
-    return [];
-  }
-
-  const searchUrl = `${SOURCE_BASES.cuevana}/search/${encodeURIComponent(searchTerm)}/`;
-  const html = await fetchText(searchUrl, {
-    headers: { Referer: SOURCE_BASES.cuevana },
-  });
-  const $ = cheerio.load(html);
-  const targetNorm = normalizeTitle(searchTerm);
-
+  const searchTerms = [...new Set([tmdb.originalTitle, tmdb.title].filter(Boolean))];
   let pagePath = null;
-  let bestScore = -1;
 
-  $('.TPost .Title').each((_, el) => {
-    const title = $(el).text().trim();
-    const href = $(el).closest('a').attr('href');
-    if (!href) {
-      return;
-    }
+  for (const searchTerm of searchTerms) {
+    const searchUrl = `${SOURCE_BASES.cuevana}/search/${encodeURIComponent(searchTerm)}/`;
+    const html = await fetchText(searchUrl, {
+      headers: { Referer: SOURCE_BASES.cuevana },
+    });
+    const $ = cheerio.load(html);
+    const targetNorm = normalizeTitle(searchTerm);
 
-    let score = 0;
-    const norm = normalizeTitle(title);
-    if (norm === targetNorm) {
-      score += 10;
-    }
-    if (norm.includes(targetNorm) || targetNorm.includes(norm)) {
-      score += 5;
-    }
+    let bestPath = null;
+    let bestScore = -1;
 
-    const year = $(el).closest('.TPost').find('.Year').first().text().trim();
-    if (tmdb.year && year === tmdb.year) {
-      score += 3;
-    }
+    $('.TPost .Title').each((_, el) => {
+      const title = $(el).text().trim();
+      const href = $(el).closest('a').attr('href');
+      if (!href) {
+        return;
+      }
 
-    if (score > bestScore) {
-      bestScore = score;
-      pagePath = href;
+      let score = 0;
+      const norm = normalizeTitle(title);
+      if (norm === targetNorm) {
+        score += 10;
+      }
+      if (norm.includes(targetNorm) || targetNorm.includes(norm)) {
+        score += 5;
+      }
+
+      const year = $(el).closest('.TPost').find('.Year').first().text().trim();
+      if (tmdb.year && year === tmdb.year) {
+        score += 3;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestPath = href;
+      }
+    });
+
+    if (bestPath) {
+      pagePath = bestPath;
+      break;
     }
-  });
+  }
 
   if (!pagePath) {
     return [];

@@ -478,7 +478,7 @@ function getStreams(tmdbId, mediaType = "movie", seasonNum = null, episodeNum = 
     if (title.toLowerCase().includes("boys") || title.toLowerCase().includes("prime")) {
       platforms = ["primevideo", "netflix", "disney"];
     }
-    console.log(`[NetMirror] Will try search queries: "${title}" and "${title} ${year}"`);
+    console.log(`[NetMirror] Will try search queries: "${title} ${year}" and "${title}"`);
     function filterRelevantResults(searchResults, query, expectedYear) {
       return searchResults.map((result) => ({
         result,
@@ -497,18 +497,18 @@ function getStreams(tmdbId, mediaType = "movie", seasonNum = null, episodeNum = 
         console.log(`[NetMirror] Searching for: "${searchQuery}"`);
         return searchContent(searchQuery, platform).then(function(searchResults) {
           if (searchResults.length === 0) {
-            if (!withYear && year) {
-              console.log(`[NetMirror] No results for "${title}", trying with year...`);
-              return trySearch(true);
+            if (withYear && year) {
+              console.log(`[NetMirror] No results for "${title} ${year}", trying title only...`);
+              return trySearch(false);
             }
             return null;
           }
           const relevantResults = filterRelevantResults(searchResults, title, year);
           if (relevantResults.length === 0) {
             console.log(`[NetMirror] Found ${searchResults.length} results but none were relevant enough`);
-            if (!withYear && year) {
-              console.log(`[NetMirror] Trying with year...`);
-              return trySearch(true);
+            if (withYear && year) {
+              console.log(`[NetMirror] Trying title-only fallback...`);
+              return trySearch(false);
             }
             return null;
           }
@@ -625,7 +625,7 @@ function getStreams(tmdbId, mediaType = "movie", seasonNum = null, episodeNum = 
           });
         });
       }
-      return trySearch(false).then(function(result) {
+      return trySearch(Boolean(year)).then(function(result) {
         if (result) {
           return result;
         } else {

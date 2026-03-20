@@ -1,6 +1,6 @@
 /**
  * webstreamer-latino - Built from src/webstreamer-latino/
- * Generated: 2026-03-20T02:10:55.392Z
+ * Generated: 2026-03-20T02:35:26.529Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -433,41 +433,45 @@ function prewarmSource(baseUrl) {
 }
 function searchCuevana(tmdb, season, episode) {
   return __async(this, null, function* () {
-    const searchTerm = tmdb.title || tmdb.originalTitle;
-    if (!searchTerm) {
-      return [];
-    }
-    const searchUrl = `${SOURCE_BASES.cuevana}/search/${encodeURIComponent(searchTerm)}/`;
-    const html = yield fetchText(searchUrl, {
-      headers: { Referer: SOURCE_BASES.cuevana }
-    });
-    const $ = import_cheerio_without_node_native.default.load(html);
-    const targetNorm = normalizeTitle(searchTerm);
+    const searchTerms = [...new Set([tmdb.originalTitle, tmdb.title].filter(Boolean))];
     let pagePath = null;
-    let bestScore = -1;
-    $(".TPost .Title").each((_, el) => {
-      const title = $(el).text().trim();
-      const href = $(el).closest("a").attr("href");
-      if (!href) {
-        return;
+    for (const searchTerm of searchTerms) {
+      const searchUrl = `${SOURCE_BASES.cuevana}/search/${encodeURIComponent(searchTerm)}/`;
+      const html = yield fetchText(searchUrl, {
+        headers: { Referer: SOURCE_BASES.cuevana }
+      });
+      const $ = import_cheerio_without_node_native.default.load(html);
+      const targetNorm = normalizeTitle(searchTerm);
+      let bestPath = null;
+      let bestScore = -1;
+      $(".TPost .Title").each((_, el) => {
+        const title = $(el).text().trim();
+        const href = $(el).closest("a").attr("href");
+        if (!href) {
+          return;
+        }
+        let score = 0;
+        const norm = normalizeTitle(title);
+        if (norm === targetNorm) {
+          score += 10;
+        }
+        if (norm.includes(targetNorm) || targetNorm.includes(norm)) {
+          score += 5;
+        }
+        const year = $(el).closest(".TPost").find(".Year").first().text().trim();
+        if (tmdb.year && year === tmdb.year) {
+          score += 3;
+        }
+        if (score > bestScore) {
+          bestScore = score;
+          bestPath = href;
+        }
+      });
+      if (bestPath) {
+        pagePath = bestPath;
+        break;
       }
-      let score = 0;
-      const norm = normalizeTitle(title);
-      if (norm === targetNorm) {
-        score += 10;
-      }
-      if (norm.includes(targetNorm) || targetNorm.includes(norm)) {
-        score += 5;
-      }
-      const year = $(el).closest(".TPost").find(".Year").first().text().trim();
-      if (tmdb.year && year === tmdb.year) {
-        score += 3;
-      }
-      if (score > bestScore) {
-        bestScore = score;
-        pagePath = href;
-      }
-    });
+    }
     if (!pagePath) {
       return [];
     }
