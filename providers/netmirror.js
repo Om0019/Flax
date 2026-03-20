@@ -703,7 +703,6 @@ function getStreams(tmdbId, mediaType = "movie", seasonNum = null, episodeNum = 
                     adaptiveStream.audioLanguages = audioLanguages;
                     const languageLabel = summarizeAudioLanguages(audioLanguages);
                     if (languageLabel) {
-                      adaptiveStream.name = `${languageLabel} ${adaptiveStream.name}`;
                       adaptiveStream.title = `${languageLabel} ${adaptiveStream.title}`;
                     }
                   }
