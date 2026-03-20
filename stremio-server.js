@@ -620,6 +620,21 @@ let ADDON_BASE = ''; // populated later
 let LAST_HOST = '';    // updated by middleware for each incoming request
 const dnsReachabilityCache = new Map();
 let latinoMediaflowModulePromise = null;
+const LATINO_ON_DEMAND_PLAYERS = new Set([
+    'filelions',
+    'emturbovid',
+    'goodstream',
+    'fastream',
+    'vimeos',
+    'streamwish',
+    'voe',
+]);
+const LATINO_RETRY_PLAYERS = new Set([
+    'fastream',
+    'vimeos',
+    'streamwish',
+    'voe',
+]);
 
 function forwardedProto(req) {
     if (!req || !req.headers) {
@@ -760,15 +775,7 @@ function extractorWrap(req, host, targetUrl, headers = {}, extraParams = {}) {
     });
 
     const normalizedHost = String(host || '').trim().toLowerCase();
-    const playbackPath = [
-        'filelions',
-        'emturbovid',
-        'goodstream',
-        'fastream',
-        'vimeos',
-        'streamwish',
-        'voe',
-    ].includes(normalizedHost)
+    const playbackPath = LATINO_ON_DEMAND_PLAYERS.has(normalizedHost)
         ? '/extractor/video/manifest.m3u8'
         : '/extractor/video';
     const path = `${playbackPath}?${query.toString()}`;
@@ -784,24 +791,11 @@ function shouldResolveLatinoOnDemand(stream) {
         return false;
     }
 
-    return [
-        'filelions',
-        'emturbovid',
-        'goodstream',
-        'fastream',
-        'vimeos',
-        'streamwish',
-        'voe',
-    ].includes(String(stream.player).toLowerCase());
+    return LATINO_ON_DEMAND_PLAYERS.has(String(stream.player).toLowerCase());
 }
 
 function shouldRetryLatinoPlaybackHost(host) {
-    return [
-        'fastream',
-        'vimeos',
-        'streamwish',
-        'voe',
-    ].includes(String(host || '').toLowerCase());
+    return LATINO_RETRY_PLAYERS.has(String(host || '').toLowerCase());
 }
 
 async function probeResolvedLatinoStream(url, headers = {}) {
