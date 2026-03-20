@@ -647,10 +647,11 @@ function requestBase(req) {
         return PUBLIC_ADDON_BASE;
     }
 
-    const host = req && req.headers && req.headers.host;
+    const host = (req && req.headers && req.headers.host) || (req && req.host);
     if (host) {
         const proto = forwardedProto(req)
-            || req.protocol
+            || (req && req.protocol)
+            || (req && req.proto)
             || (host.includes('onrender.com') || host.includes('koyeb.app') ? 'https' : 'http');
         return `${proto}://${host}`;
     }
@@ -1265,15 +1266,15 @@ builder.defineStreamHandler(async ({ type, id }) => {
                 || nameLower.includes('vixsrc');
             const proxiedUrl = shouldResolveLatinoOnDemand(s)
                 ? extractorWrap(
-                    req,
+                    requestContext,
                     s.player,
                     s.extractorTarget,
                     s.extractorHeaders || providerHeaders,
                     { redirect_stream: 'true', sid: playbackSession.id }
                 )
                 : (isHls
-                    ? proxyWrapHls(req, s.url, finalHeaders, { sid: playbackSession.id })
-                    : proxyWrap(req, s.url, finalHeaders, { sid: playbackSession.id }));
+                    ? proxyWrapHls(requestContext, s.url, finalHeaders, { sid: playbackSession.id })
+                    : proxyWrap(requestContext, s.url, finalHeaders, { sid: playbackSession.id }));
 
             return {
                 name: s.name || "Source",
@@ -1326,6 +1327,7 @@ function startServer(addonInterface, opts = {}) {
             path: req.path,
             originalUrl: req.originalUrl,
             host: req.headers.host || null,
+            proto: forwardedProto(req) || req.protocol || null,
             clientIp: device.ip,
             deviceId: device.id,
             app: device.app,
