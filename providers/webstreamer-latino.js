@@ -1,6 +1,6 @@
 /**
  * webstreamer-latino - Built from src/webstreamer-latino/
- * Generated: 2026-03-20T02:47:21.240Z
+ * Generated: 2026-03-20T02:57:06.660Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -1288,25 +1288,25 @@ function inferPlayerFromUrl(url) {
 }
 function playerRank(player) {
   switch (player) {
-    case "Dropload":
-      return 80;
-    case "Fastream":
-      return 70;
-    case "Vidora":
-      return 60;
-    case "StrP2P":
-      return 55;
-    case "StreamEmbed":
-      return 50;
-    case "Vimeos":
-      return 48;
-    case "Mixdrop":
-      return 40;
     case "FileLions":
-      return 38;
+      return 90;
     case "Emturbovid":
-      return 36;
+      return 85;
     case "DoodStream":
+      return 80;
+    case "Dropload":
+      return 70;
+    case "Fastream":
+      return 60;
+    case "Mixdrop":
+      return 55;
+    case "Vidora":
+      return 45;
+    case "StrP2P":
+      return 40;
+    case "StreamEmbed":
+      return 35;
+    case "Vimeos":
       return 30;
     case "Streamtape":
       return 20;
