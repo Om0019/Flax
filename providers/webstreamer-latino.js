@@ -1931,7 +1931,11 @@ ${unpacked}`;
     const posterMatch = body.match(/image:"([^"]+)"/i);
     const streamHeaders = buildPlaybackHeaders(url.href, {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-      Accept: "*/*"
+      Accept: "*/*",
+      "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
+      "sec-ch-ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+      "sec-ch-ua-mobile": "?0",
+      "sec-ch-ua-platform": '"Windows"'
     });
     const viewMatch = body.match(/\/dl\?op=view&view_id=(\d+)&hash=([a-z0-9-]+)/i);
     if (viewMatch) {
