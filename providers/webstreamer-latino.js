@@ -1891,6 +1891,11 @@ function resolveGoodstream(result, url) {
       "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
       Accept: "*/*"
     }, cookieHeader ? { Cookie: cookieHeader } : {}));
+    const viewMatch = html.match(/\/dl\?op=view&view_id=(\d+)&hash=([a-z0-9-]+)/i);
+    if (viewMatch) {
+      const beaconUrl = new URL(`/dl?op=view&view_id=${viewMatch[1]}&hash=${viewMatch[2]}&adb=0`, url.origin).href;
+      yield fetchText(beaconUrl, { headers: streamHeaders }).catch(() => null);
+    }
     const height = yield guessHeightFromPlaylist(playlistUrl, streamHeaders).catch(() => null);
     return [buildStream(result, {
       url: playlistUrl,
