@@ -26,6 +26,7 @@ const PLAYBACK_ACTIVE_WINDOW_MS = 10 * 60 * 1000;
 const PLAYBACK_RECENT_WINDOW_MS = 60 * 60 * 1000;
 const addonConfig = require('./addon.config.json');
 const providers = [];
+const providerRegistry = new Map();
 const pDir = path.join(__dirname, 'providers');
 const activeProviders = new Set(addonConfig.activeProviders || []);
 const KNOWN_PLAYERS = [
@@ -393,6 +394,70 @@ function providerEnabled(name) {
     return controlState.providers.get(name)?.enabled !== false;
 }
 
+function findLoadedProviderIndex(name) {
+    return providers.findIndex((provider) => provider.name === name);
+}
+
+function registerProvider(name) {
+    if (!providerRegistry.has(name)) {
+        providerRegistry.set(name, {
+            name,
+            filename: path.join(pDir, `${name}.js`),
+            loaded: false,
+        });
+    }
+    if (!controlState.providers.has(name)) {
+        controlState.providers.set(name, { enabled: false, available: true });
+    }
+    return providerRegistry.get(name);
+}
+
+function loadProviderByName(name) {
+    const record = registerProvider(name);
+    if (!fs.existsSync(record.filename)) {
+        controlState.providers.set(name, { enabled: false, available: false });
+        return false;
+    }
+
+    if (record.loaded && typeof record.getStreams === 'function') {
+        controlState.providers.set(name, { enabled: true, available: true });
+        if (findLoadedProviderIndex(name) === -1) {
+            providers.push({ name, getStreams: record.getStreams });
+        }
+        return true;
+    }
+
+    try {
+        delete require.cache[require.resolve(record.filename)];
+        const moduleExports = require(record.filename);
+        if (typeof moduleExports.getStreams !== 'function') {
+            controlState.providers.set(name, { enabled: false, available: false });
+            record.loaded = false;
+            record.getStreams = null;
+            console.warn(`Skipped ${name}: no getStreams`);
+            return false;
+        }
+
+        record.loaded = true;
+        record.getStreams = moduleExports.getStreams;
+        const existingIndex = findLoadedProviderIndex(name);
+        if (existingIndex === -1) {
+            providers.push({ name, getStreams: moduleExports.getStreams });
+        } else {
+            providers[existingIndex] = { name, getStreams: moduleExports.getStreams };
+        }
+        controlState.providers.set(name, { enabled: true, available: true });
+        console.log(`Loaded provider: ${name}`);
+        return true;
+    } catch (error) {
+        record.loaded = false;
+        record.getStreams = null;
+        controlState.providers.set(name, { enabled: false, available: false });
+        console.error(`Failed loading ${name}:`, error.message);
+        return false;
+    }
+}
+
 function bumpStreamConfigVersion() {
     controlState.configVersion += 1;
     streamResultCache.clear();
@@ -403,11 +468,19 @@ function bumpStreamConfigVersion() {
 function setProviderEnabled(name, enabled) {
     const existing = controlState.providers.get(name);
     if (!existing) {
-        return false;
+        return 'not_found';
     }
-    controlState.providers.set(name, { ...existing, enabled: Boolean(enabled) });
+
+    if (enabled) {
+        if (!loadProviderByName(name)) {
+            return 'unavailable';
+        }
+    } else {
+        controlState.providers.set(name, { ...existing, enabled: false });
+    }
+
     bumpStreamConfigVersion();
-    return true;
+    return 'ok';
 }
 
 function normalizePlayerName(value) {
@@ -469,14 +542,16 @@ function buildControlsPayload() {
         paused: controlState.paused,
         stopped: controlState.stopped,
         mode: serverMode(),
-        providers: providers.map((provider) => {
-            const state = controlState.providers.get(provider.name) || { enabled: true, available: true };
+        providers: [...controlState.providers.entries()]
+            .map(([name, state]) => {
+            const registryEntry = providerRegistry.get(name);
             return {
-                name: provider.name,
-                enabled: state.enabled,
-                available: state.available !== false,
+                name,
+                enabled: state.enabled !== false,
+                available: state.available !== false && (registryEntry ? fs.existsSync(registryEntry.filename) : true),
             };
-        }),
+        })
+            .sort((a, b) => a.name.localeCompare(b.name)),
         players: [...controlState.players.entries()]
             .map(([name, state]) => ({
                 name,
@@ -579,7 +654,12 @@ async function fetchCinemetaMeta(type, imdbId) {
 
 if (fs.existsSync(pDir)) {
     fs.readdirSync(pDir).forEach(f => {
+        if (!f.endsWith('.js')) {
+            return;
+        }
+
         const base = f.replace('.js', '');
+        registerProvider(base);
         const isActive = activeProviders.has(base);
         if (!IS_PROD) {
             console.log(`Found provider file: ${f}`);
@@ -593,18 +673,8 @@ if (fs.existsSync(pDir)) {
             return;
         }
 
-        try {
-            const p = require(path.join(pDir, f));
-            if (p.getStreams) {
-                providers.push({ name: base, getStreams: p.getStreams });
-                controlState.providers.set(base, { enabled: true, available: true });
-                console.log(`Loaded provider: ${base}`);
-            } else if (!IS_PROD) {
-                console.log(`Skipped ${base}: no getStreams`);
-            }
-        } catch (e) {
-            controlState.providers.set(base, { enabled: false, available: false });
-            console.error(`Failed loading ${base}:`, e.message);
+        if (!loadProviderByName(base) && !IS_PROD) {
+            console.log(`Provider left disabled after failed load: ${base}`);
         }
     });
 }
@@ -1473,9 +1543,13 @@ function startServer(addonInterface, opts = {}) {
     });
 
     app.post('/monitor/controls/providers/:name', monitorAuth, (req, res) => {
-        const name = String(req.params.name || '').trim();
-        if (!setProviderEnabled(name, req.body?.enabled)) {
+        const name = decodeURIComponent(String(req.params.name || '').trim());
+        const result = setProviderEnabled(name, req.body?.enabled);
+        if (result === 'not_found') {
             return res.status(404).json({ error: 'provider_not_found' });
+        }
+        if (result === 'unavailable') {
+            return res.status(409).json({ error: 'provider_unavailable' });
         }
         recordActivity({
             eventType: 'provider_toggled',
