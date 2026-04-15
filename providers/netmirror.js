@@ -520,6 +520,7 @@ function findEpisodeId(episodes, season, episode) {
   }
 }
 function getStreams(tmdbId, mediaType = "movie", seasonNum = null, episodeNum = null) {
+  mediaType = mediaType === "series" ? "tv" : mediaType;
   console.log(`[NetMirror] Fetching streams for TMDB ID: ${tmdbId}, Type: ${mediaType}${seasonNum ? `, S${seasonNum}E${episodeNum}` : ""}`);
   const tmdbUrl = `https://api.themoviedb.org/3/${mediaType === "tv" ? "tv" : "movie"}/${tmdbId}?api_key=${TMDB_API_KEY}`;
   return makeRequest(tmdbUrl).then(function(tmdbResponse) {
@@ -539,6 +540,10 @@ function getStreams(tmdbId, mediaType = "movie", seasonNum = null, episodeNum = 
     console.log(`[NetMirror] Will try search queries: "${title} ${year}" and "${title}"`);
     function isAcceptableContentMatch(contentData) {
       if (!contentData) {
+        return false;
+      }
+      if (mediaType === "tv" && contentData.isMovie) {
+        console.log("[NetMirror] Rejecting loaded content because TV request matched a movie");
         return false;
       }
       if (mediaType === "movie" && year && contentData.year && String(contentData.year) !== String(year)) {
