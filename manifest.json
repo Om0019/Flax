@@ -1,6 +1,6 @@
 {
   "name": "Flax Providers",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "scrapers": [
     {
       "id": "4khdhub",
@@ -436,7 +436,7 @@
       "id": "webstreamer-latino",
       "name": "Webstreamer Latino",
       "description": "Latino subset of WebStreamr using Cuevana, CineHDPlus, HomeCine, and VerHdLink",
-      "version": "1.1.1",
+      "version": "1.1.2",
       "author": "Nuvio Team",
       "supportedTypes": [
         "movie",
@@ -450,7 +450,10 @@
       ],
       "logo": "https://ww1.cuevana3.is/favicon.ico",
       "contentLanguage": [
-        "es"
+        "en",
+        "es",
+        "es-mx",
+        "es-es"
       ]
     }
   ]
