@@ -5,6 +5,41 @@ import { getEnvValue } from './env.js';
 import { buildEpisodeTag } from './tmdb.js';
 import { normalizeTitle } from './utils.js';
 
+function encodeBase64(value) {
+  const input = String(value || '');
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(input).toString('base64');
+  }
+  if (typeof btoa === 'function') {
+    return btoa(input);
+  }
+
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+  let output = '';
+  let index = 0;
+
+  while (index < input.length) {
+    const chr1 = input.charCodeAt(index++);
+    const chr2 = input.charCodeAt(index++);
+    const chr3 = input.charCodeAt(index++);
+    const enc1 = chr1 >> 2;
+    const enc2 = ((chr1 & 3) << 4) | (chr2 >> 4);
+    let enc3 = ((chr2 & 15) << 2) | (chr3 >> 6);
+    let enc4 = chr3 & 63;
+
+    if (Number.isNaN(chr2)) {
+      enc3 = 64;
+      enc4 = 64;
+    } else if (Number.isNaN(chr3)) {
+      enc4 = 64;
+    }
+
+    output += chars.charAt(enc1) + chars.charAt(enc2) + chars.charAt(enc3) + chars.charAt(enc4);
+  }
+
+  return output;
+}
+
 function languageMeta(kind) {
   return kind === 'mx'
     ? { language: 'Latino', contentLanguage: 'es-mx' }
@@ -117,6 +152,7 @@ function appendLatinoResult(results, result) {
 }
 
 export async function getLatinoSourceResults(tmdb, mediaType, season, episode) {
+  const normalizedMediaType = tmdb.mediaType || (mediaType === 'series' ? 'tv' : mediaType);
   const disabled = new Set(
     String(getEnvValue('WEBSTREAMER_LATINO_DISABLED_SOURCES', ''))
       .split(',')
@@ -152,9 +188,9 @@ export async function getLatinoSourceResults(tmdb, mediaType, season, episode) {
     });
 
   const tasks = [
-    !disabled.has('cinecalidad') && withTimeout('cinecalidad', searchCineCalidad(tmdb, mediaType, season, episode)),
+    !disabled.has('cinecalidad') && withTimeout('cinecalidad', searchCineCalidad(tmdb, normalizedMediaType, season, episode)),
     !disabled.has('homecine') && withTimeout('homecine', searchHomeCine(tmdb, season, episode)),
-    !disabled.has('tioplus') && withTimeout('tioplus', searchTioPlus(tmdb, mediaType, season, episode)),
+    !disabled.has('tioplus') && withTimeout('tioplus', searchTioPlus(tmdb, normalizedMediaType, season, episode)),
   ].filter(Boolean);
 
   const settled = await Promise.allSettled(tasks);
@@ -758,7 +794,7 @@ async function searchTioPlusSeries(tmdb, season, episode) {
         source: 'TioPlus',
         ...languageMeta('mx'),
         title: buildTitle(tmdb, season, episode),
-        url: `${SOURCE_BASES.tioplus}/player/${Buffer.from(token).toString('base64')}`,
+        url: `${SOURCE_BASES.tioplus}/player/${encodeBase64(token)}`,
         referer: episodeUrl,
         headers: { Referer: episodeUrl },
         _tioplusToken: token,
@@ -827,7 +863,7 @@ async function searchTioPlusMovieFlow(tmdb, mediaType) {
         source: 'TioPlus',
         ...languageMeta('mx'),
         title: buildTitle(tmdb),
-        url: `${SOURCE_BASES.tioplus}/player/${Buffer.from(token).toString('base64')}`,
+        url: `${SOURCE_BASES.tioplus}/player/${encodeBase64(token)}`,
         referer: pageUrl,
         headers: { Referer: pageUrl },
         _tioplusToken: token,

@@ -1,6 +1,6 @@
 /**
  * webstreamer-latino - Built from src/webstreamer-latino/
- * Generated: 2026-04-15T20:43:36.342Z
+ * Generated: 2026-04-15T20:49:36.923Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -237,7 +237,7 @@ function fetchJson(_0) {
 
 // src/webstreamer-latino/tmdb.js
 function normalizeMediaType(mediaType) {
-  return mediaType === "tv" ? "tv" : "movie";
+  return mediaType === "tv" || mediaType === "series" ? "tv" : "movie";
 }
 function getTmdbInfo(tmdbId, mediaType) {
   return __async(this, null, function* () {
@@ -356,6 +356,35 @@ function guessHeightFromPlaylist(_0) {
 }
 
 // src/webstreamer-latino/sources.js
+function encodeBase64(value) {
+  const input = String(value || "");
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(input).toString("base64");
+  }
+  if (typeof btoa === "function") {
+    return btoa(input);
+  }
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+  let output = "";
+  let index = 0;
+  while (index < input.length) {
+    const chr1 = input.charCodeAt(index++);
+    const chr2 = input.charCodeAt(index++);
+    const chr3 = input.charCodeAt(index++);
+    const enc1 = chr1 >> 2;
+    const enc2 = (chr1 & 3) << 4 | chr2 >> 4;
+    let enc3 = (chr2 & 15) << 2 | chr3 >> 6;
+    let enc4 = chr3 & 63;
+    if (Number.isNaN(chr2)) {
+      enc3 = 64;
+      enc4 = 64;
+    } else if (Number.isNaN(chr3)) {
+      enc4 = 64;
+    }
+    output += chars.charAt(enc1) + chars.charAt(enc2) + chars.charAt(enc3) + chars.charAt(enc4);
+  }
+  return output;
+}
 function languageMeta(kind) {
   return kind === "mx" ? { language: "Latino", contentLanguage: "es-mx" } : { language: "Castellano", contentLanguage: "es-es" };
 }
@@ -448,6 +477,7 @@ function appendLatinoResult(results, result) {
 }
 function getLatinoSourceResults(tmdb, mediaType, season, episode) {
   return __async(this, null, function* () {
+    const normalizedMediaType = tmdb.mediaType || (mediaType === "series" ? "tv" : mediaType);
     const disabled = new Set(
       String(getEnvValue("WEBSTREAMER_LATINO_DISABLED_SOURCES", "")).split(",").map((v) => v.trim().toLowerCase()).filter(Boolean)
     );
@@ -474,9 +504,9 @@ function getLatinoSourceResults(tmdb, mediaType, season, episode) {
       return [];
     });
     const tasks = [
-      !disabled.has("cinecalidad") && withTimeout("cinecalidad", searchCineCalidad(tmdb, mediaType, season, episode)),
+      !disabled.has("cinecalidad") && withTimeout("cinecalidad", searchCineCalidad(tmdb, normalizedMediaType, season, episode)),
       !disabled.has("homecine") && withTimeout("homecine", searchHomeCine(tmdb, season, episode)),
-      !disabled.has("tioplus") && withTimeout("tioplus", searchTioPlus(tmdb, mediaType, season, episode))
+      !disabled.has("tioplus") && withTimeout("tioplus", searchTioPlus(tmdb, normalizedMediaType, season, episode))
     ].filter(Boolean);
     const settled = yield Promise.allSettled(tasks);
     return settled.flatMap((result) => {
@@ -877,7 +907,7 @@ function searchTioPlusSeries(tmdb, season, episode) {
           source: "TioPlus"
         }, languageMeta("mx")), {
           title: buildTitle(tmdb, season, episode),
-          url: `${SOURCE_BASES.tioplus}/player/${Buffer.from(token).toString("base64")}`,
+          url: `${SOURCE_BASES.tioplus}/player/${encodeBase64(token)}`,
           referer: episodeUrl,
           headers: { Referer: episodeUrl },
           _tioplusToken: token
@@ -935,7 +965,7 @@ function searchTioPlusMovieFlow(tmdb, mediaType) {
           source: "TioPlus"
         }, languageMeta("mx")), {
           title: buildTitle(tmdb),
-          url: `${SOURCE_BASES.tioplus}/player/${Buffer.from(token).toString("base64")}`,
+          url: `${SOURCE_BASES.tioplus}/player/${encodeBase64(token)}`,
           referer: pageUrl,
           headers: { Referer: pageUrl },
           _tioplusToken: token

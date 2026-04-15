@@ -2,7 +2,7 @@ import { TMDB_API_KEY, TMDB_BASE_URL } from './constants.js';
 import { fetchJson } from './http.js';
 
 function normalizeMediaType(mediaType) {
-  return mediaType === 'tv' ? 'tv' : 'movie';
+  return mediaType === 'tv' || mediaType === 'series' ? 'tv' : 'movie';
 }
 
 export async function getTmdbInfo(tmdbId, mediaType) {
