@@ -1,5 +1,4 @@
 import cheerio from 'cheerio-without-node-native';
-import axios from 'axios';
 import CryptoJS from 'crypto-js';
 import { fetchJson, fetchPage, fetchText } from './http.js';
 import { getEnvValue } from './env.js';
@@ -428,24 +427,19 @@ async function validatePlayableStreams(streams) {
 
 async function probePlaybackUrl(url, headers = {}) {
   try {
-    const response = await axios({
-      url,
+    const response = await fetch(url, {
       method: 'GET',
       headers: {
         Range: 'bytes=0-0',
         ...(headers || {}),
       },
-      responseType: 'arraybuffer',
-      maxRedirects: 5,
-      timeout: 1200,
-      validateStatus: () => true,
     });
 
     if (![200, 206].includes(response.status)) {
       return false;
     }
 
-    const contentType = String(response.headers?.['content-type'] || '').toLowerCase();
+    const contentType = String(response.headers?.get ? response.headers.get('content-type') : '').toLowerCase();
     if (contentType.includes('text/html')) {
       return false;
     }

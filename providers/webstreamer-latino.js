@@ -1,6 +1,6 @@
 /**
  * webstreamer-latino - Built from src/webstreamer-latino/
- * Generated: 2026-04-15T20:49:36.923Z
+ * Generated: 2026-04-15T21:01:26.362Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -98,9 +98,6 @@ var SOURCE_BASES = {
   tioplus: "https://tioplus.app"
 };
 
-// src/webstreamer-latino/http.js
-var import_axios = __toESM(require("axios"));
-
 // src/webstreamer-latino/env.js
 function getEnvValue(name, fallback = "") {
   if (typeof process !== "undefined" && process && process.env && Object.prototype.hasOwnProperty.call(process.env, name)) {
@@ -119,8 +116,23 @@ function getCookieHeader(url) {
   const hostname = new URL(url).hostname;
   return cookieJar.get(hostname) || "";
 }
-function storeCookies(url, response) {
-  var _a;
+function headersToObject(headers) {
+  const result = {};
+  if (!headers) {
+    return result;
+  }
+  if (typeof headers.forEach === "function") {
+    headers.forEach((value, key) => {
+      result[String(key).toLowerCase()] = String(value);
+    });
+    return result;
+  }
+  for (const [key, value] of Object.entries(headers || {})) {
+    result[String(key).toLowerCase()] = Array.isArray(value) ? value.join(", ") : String(value);
+  }
+  return result;
+}
+function storeCookies(url, headers) {
   const hostname = new URL(url).hostname;
   const existing = cookieJar.get(hostname) || "";
   const cookieMap = /* @__PURE__ */ new Map();
@@ -133,7 +145,7 @@ function storeCookies(url, response) {
       cookieMap.set(name.trim(), rest.join("=").trim());
     });
   }
-  const setCookie = (_a = response.headers) == null ? void 0 : _a["set-cookie"];
+  const setCookie = headers == null ? void 0 : headers["set-cookie"];
   const cookies = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
   cookies.forEach((cookie) => {
     const pair = String(cookie).split(";")[0];
@@ -162,18 +174,21 @@ function issueRequest(_0) {
       "Sec-Fetch-Site": "none",
       "Sec-Fetch-User": "?1"
     };
-    const response = yield (0, import_axios.default)({
-      url,
+    const response = yield fetch(url, {
       method: options.method || "GET",
       headers: mergeHeaders(__spreadValues(__spreadValues(__spreadValues({}, navigationHeaders), cookieHeader ? { Cookie: cookieHeader } : {}), options.headers || {})),
-      data: options.body,
-      responseType: "text",
-      maxRedirects: 5,
-      timeout: REQUEST_TIMEOUT_MS,
-      validateStatus: () => true
+      body: options.body
     });
-    storeCookies(url, response);
-    return response;
+    const text = yield response.text();
+    const headers = headersToObject(response.headers);
+    storeCookies(url, headers);
+    return {
+      status: response.status,
+      statusText: response.statusText || "",
+      headers,
+      text,
+      url: response.url || url
+    };
   });
 }
 function warmHost(url, headers) {
@@ -188,7 +203,6 @@ function warmHost(url, headers) {
 }
 function fetchPage(_0) {
   return __async(this, arguments, function* (url, options = {}) {
-    var _a, _b, _c;
     let response = yield issueRequest(url, options);
     if (response.status === 403 && !options._warmed) {
       yield warmHost(url, options.headers);
@@ -197,14 +211,10 @@ function fetchPage(_0) {
     if (response.status < 200 || response.status >= 300) {
       throw new Error(`HTTP ${response.status}: ${response.statusText} for ${url}`);
     }
-    const headers = {};
-    for (const [key, value] of Object.entries(response.headers || {})) {
-      headers[key.toLowerCase()] = Array.isArray(value) ? value.join(", ") : String(value);
-    }
     return {
-      text: typeof response.data === "string" ? response.data : String(response.data || ""),
-      url: ((_b = (_a = response.request) == null ? void 0 : _a.res) == null ? void 0 : _b.responseUrl) || ((_c = response.config) == null ? void 0 : _c.url) || url,
-      headers
+      text: response.text,
+      url: response.url || url,
+      headers: response.headers || {}
     };
   });
 }
@@ -216,22 +226,17 @@ function fetchText(_0) {
 }
 function fetchJson(_0) {
   return __async(this, arguments, function* (url, options = {}) {
-    const response = yield (0, import_axios.default)({
-      url,
+    const response = yield fetch(url, {
       method: options.method || "GET",
       headers: mergeHeaders(__spreadValues({
         Accept: "application/json,text/plain,*/*"
       }, options.headers || {})),
-      data: options.body,
-      responseType: "json",
-      maxRedirects: 5,
-      timeout: REQUEST_TIMEOUT_MS,
-      validateStatus: () => true
+      body: options.body
     });
     if (response.status < 200 || response.status >= 300) {
       throw new Error(`HTTP ${response.status}: ${response.statusText} for ${url}`);
     }
-    return response.data;
+    return yield response.json();
   });
 }
 
@@ -1064,7 +1069,6 @@ function resolveTioPlusPlayer(result) {
 
 // src/webstreamer-latino/extractors.js
 var import_cheerio_without_node_native2 = __toESM(require("cheerio-without-node-native"));
-var import_axios2 = __toESM(require("axios"));
 var import_crypto_js = __toESM(require("crypto-js"));
 var SHOULD_VALIDATE_MEDIA = getEnvValue("NODE_ENV") === "production";
 function absoluteUrl(rawUrl, origin) {
@@ -1421,21 +1425,16 @@ function probePlaybackUrl(_0) {
   return __async(this, arguments, function* (url, headers = {}) {
     var _a;
     try {
-      const response = yield (0, import_axios2.default)({
-        url,
+      const response = yield fetch(url, {
         method: "GET",
         headers: __spreadValues({
           Range: "bytes=0-0"
-        }, headers || {}),
-        responseType: "arraybuffer",
-        maxRedirects: 5,
-        timeout: 1200,
-        validateStatus: () => true
+        }, headers || {})
       });
       if (![200, 206].includes(response.status)) {
         return false;
       }
-      const contentType = String(((_a = response.headers) == null ? void 0 : _a["content-type"]) || "").toLowerCase();
+      const contentType = String(((_a = response.headers) == null ? void 0 : _a.get) ? response.headers.get("content-type") : "").toLowerCase();
       if (contentType.includes("text/html")) {
         return false;
       }

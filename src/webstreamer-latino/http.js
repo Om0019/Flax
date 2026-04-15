@@ -1,4 +1,3 @@
-import axios from 'axios';
 import { DEFAULT_HEADERS } from './constants.js';
 import { getEnvValue } from './env.js';
 
@@ -14,7 +13,27 @@ function getCookieHeader(url) {
   return cookieJar.get(hostname) || '';
 }
 
-function storeCookies(url, response) {
+function headersToObject(headers) {
+  const result = {};
+  if (!headers) {
+    return result;
+  }
+
+  if (typeof headers.forEach === 'function') {
+    headers.forEach((value, key) => {
+      result[String(key).toLowerCase()] = String(value);
+    });
+    return result;
+  }
+
+  for (const [key, value] of Object.entries(headers || {})) {
+    result[String(key).toLowerCase()] = Array.isArray(value) ? value.join(', ') : String(value);
+  }
+
+  return result;
+}
+
+function storeCookies(url, headers) {
   const hostname = new URL(url).hostname;
   const existing = cookieJar.get(hostname) || '';
   const cookieMap = new Map();
@@ -29,7 +48,7 @@ function storeCookies(url, response) {
     });
   }
 
-  const setCookie = response.headers?.['set-cookie'];
+  const setCookie = headers?.['set-cookie'];
   const cookies = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
 
   cookies.forEach((cookie) => {
@@ -61,23 +80,27 @@ async function issueRequest(url, options = {}) {
     'Sec-Fetch-User': '?1',
   };
 
-  const response = await axios({
-    url,
+  const response = await fetch(url, {
     method: options.method || 'GET',
     headers: mergeHeaders({
       ...navigationHeaders,
       ...(cookieHeader ? { Cookie: cookieHeader } : {}),
       ...(options.headers || {}),
     }),
-    data: options.body,
-    responseType: 'text',
-    maxRedirects: 5,
-    timeout: REQUEST_TIMEOUT_MS,
-    validateStatus: () => true,
+    body: options.body,
   });
 
-  storeCookies(url, response);
-  return response;
+  const text = await response.text();
+  const headers = headersToObject(response.headers);
+  storeCookies(url, headers);
+
+  return {
+    status: response.status,
+    statusText: response.statusText || '',
+    headers,
+    text,
+    url: response.url || url,
+  };
 }
 
 async function warmHost(url, headers) {
@@ -101,15 +124,10 @@ export async function fetchPage(url, options = {}) {
   if (response.status < 200 || response.status >= 300) {
     throw new Error(`HTTP ${response.status}: ${response.statusText} for ${url}`);
   }
-  const headers = {};
-  for (const [key, value] of Object.entries(response.headers || {})) {
-    headers[key.toLowerCase()] = Array.isArray(value) ? value.join(', ') : String(value);
-  }
-
   return {
-    text: typeof response.data === 'string' ? response.data : String(response.data || ''),
-    url: response.request?.res?.responseUrl || response.config?.url || url,
-    headers,
+    text: response.text,
+    url: response.url || url,
+    headers: response.headers || {},
   };
 }
 
@@ -119,23 +137,18 @@ export async function fetchText(url, options = {}) {
 }
 
 export async function fetchJson(url, options = {}) {
-  const response = await axios({
-    url,
+  const response = await fetch(url, {
     method: options.method || 'GET',
     headers: mergeHeaders({
       Accept: 'application/json,text/plain,*/*',
       ...(options.headers || {}),
     }),
-    data: options.body,
-    responseType: 'json',
-    maxRedirects: 5,
-    timeout: REQUEST_TIMEOUT_MS,
-    validateStatus: () => true,
+    body: options.body,
   });
 
   if (response.status < 200 || response.status >= 300) {
     throw new Error(`HTTP ${response.status}: ${response.statusText} for ${url}`);
   }
 
-  return response.data;
+  return await response.json();
 }
