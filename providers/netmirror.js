@@ -694,23 +694,32 @@ function getStreams(tmdbId, mediaType = "movie", seasonNum = null, episodeNum = 
                 const qualityB = parseQuality(b.quality);
                 return qualityB - qualityA;
               });
-              const adaptiveStream = streams.find((stream) => !/[?&]q=\d+p/i.test(stream.url)) || streams[0];
-              if (adaptiveStream) {
-                adaptiveStream.quality = "Auto";
-                adaptiveStream.title = adaptiveStream.title.replace(/\s+(Auto|1080p|720p|480p|360p)$/i, " Auto");
-                return extractAudioLanguagesFromManifest(adaptiveStream.url, adaptiveStream.headers).then((audioLanguages) => {
+              const fixedQualityStreams = streams.filter((stream) => /[?&]q=\d+p/i.test(stream.url));
+              const adaptiveStream = streams.find((stream) => !/[?&]q=\d+p/i.test(stream.url));
+              const playbackStreams = fixedQualityStreams.length > 0 ? fixedQualityStreams : adaptiveStream ? [adaptiveStream] : [];
+              if (adaptiveStream && playbackStreams.length === 1 && playbackStreams[0] === adaptiveStream) {
+                playbackStreams[0].quality = "Auto";
+                playbackStreams[0].title = playbackStreams[0].title.replace(/\s+(Auto|1080p|720p|480p|360p)$/i, " Auto");
+              }
+              if (playbackStreams.length > 0) {
+                const languageProbeStream = adaptiveStream || playbackStreams[0];
+                return extractAudioLanguagesFromManifest(languageProbeStream.url, languageProbeStream.headers).then((audioLanguages) => {
                   if (audioLanguages.length > 0) {
-                    adaptiveStream.audioLanguages = audioLanguages;
+                    playbackStreams.forEach((stream) => {
+                      stream.audioLanguages = audioLanguages;
+                    });
                     const languageLabel = summarizeAudioLanguages(audioLanguages);
                     if (languageLabel) {
-                      adaptiveStream.title = `${languageLabel} ${adaptiveStream.title}`;
+                      playbackStreams.forEach((stream) => {
+                        stream.title = `${languageLabel} ${stream.title}`;
+                      });
                     }
                   }
-                  console.log(`[NetMirror] Successfully processed ${streams.length} streams from ${platform}, returning adaptive stream`);
-                  return [adaptiveStream];
+                  console.log(`[NetMirror] Successfully processed ${streams.length} streams from ${platform}, returning ${playbackStreams.length} fixed/mobile-safe stream(s)`);
+                  return playbackStreams;
                 });
               }
-              console.log(`[NetMirror] Successfully processed ${streams.length} streams from ${platform}, returning ${adaptiveStream ? "adaptive stream" : "no streams"}`);
+              console.log(`[NetMirror] Successfully processed ${streams.length} streams from ${platform}, returning no streams`);
               return [];
             });
           });
