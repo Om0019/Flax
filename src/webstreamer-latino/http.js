@@ -4,6 +4,24 @@ import { getEnvValue } from './env.js';
 const cookieJar = new Map();
 const REQUEST_TIMEOUT_MS = Math.max(1000, parseInt(getEnvValue('WEBSTREAMER_LATINO_HTTP_TIMEOUT_MS', '15000'), 10) || 15000);
 
+function timeoutSignal(ms) {
+  if (!ms || !globalThis.AbortSignal) {
+    return undefined;
+  }
+
+  if (typeof globalThis.AbortSignal.timeout === 'function') {
+    return globalThis.AbortSignal.timeout(ms);
+  }
+
+  if (typeof globalThis.AbortController !== 'function') {
+    return undefined;
+  }
+
+  const controller = new globalThis.AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller.signal;
+}
+
 function mergeHeaders(headers) {
   return { ...DEFAULT_HEADERS, ...(headers || {}) };
 }
@@ -88,6 +106,7 @@ async function issueRequest(url, options = {}) {
       ...(options.headers || {}),
     }),
     body: options.body,
+    signal: options.signal || timeoutSignal(options.timeoutMs || REQUEST_TIMEOUT_MS),
   });
 
   const text = await response.text();
@@ -144,6 +163,7 @@ export async function fetchJson(url, options = {}) {
       ...(options.headers || {}),
     }),
     body: options.body,
+    signal: options.signal || timeoutSignal(options.timeoutMs || REQUEST_TIMEOUT_MS),
   });
 
   if (response.status < 200 || response.status >= 300) {

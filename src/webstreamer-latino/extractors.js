@@ -1,10 +1,19 @@
 import cheerio from 'cheerio-without-node-native';
 import CryptoJS from 'crypto-js';
+import { DEFAULT_EXTRACTOR_CANDIDATE_LIMIT, DEFAULT_EXTRACTOR_TIMEOUT_MS } from './constants.js';
 import { fetchJson, fetchPage, fetchText } from './http.js';
 import { getEnvValue } from './env.js';
 import { extractPackedUrl, guessHeightFromPlaylist, parseQuality, qualityRank, uniqueBy, unpackPacker } from './utils.js';
 
 const SHOULD_VALIDATE_MEDIA = getEnvValue('NODE_ENV') === 'production';
+const EXTRACTOR_TIMEOUT_MS = Math.max(
+  1000,
+  parseInt(getEnvValue('WEBSTREAMER_LATINO_EXTRACTOR_TIMEOUT_MS', String(DEFAULT_EXTRACTOR_TIMEOUT_MS)), 10) || DEFAULT_EXTRACTOR_TIMEOUT_MS
+);
+const EXTRACTOR_CANDIDATE_LIMIT = Math.max(
+  1,
+  parseInt(getEnvValue('WEBSTREAMER_LATINO_EXTRACTOR_CANDIDATE_LIMIT', String(DEFAULT_EXTRACTOR_CANDIDATE_LIMIT)), 10) || DEFAULT_EXTRACTOR_CANDIDATE_LIMIT
+);
 
 function absoluteUrl(rawUrl, origin) {
   return new URL(rawUrl.replace(/^\/\//, 'https://'), origin).href;
@@ -166,12 +175,18 @@ function buildStream(result, extracted) {
 }
 
 export async function resolveLatinoStreams(results) {
-  results.forEach((result) => {
+  const candidates = prioritizeExtractorCandidates(results).slice(0, EXTRACTOR_CANDIDATE_LIMIT);
+
+  candidates.forEach((result) => {
     const player = inferPlayerFromUrl(result.url);
     console.log(`[WebstreamerLatino] Candidate: ${result.source} -> ${result.url} -> ${player || 'unknown'}`);
   });
 
-  const settled = await Promise.allSettled(results.map((result) => resolveOne(result)));
+  if (results.length > candidates.length) {
+    console.log(`[WebstreamerLatino] Candidate cap: resolving ${candidates.length}/${results.length}`);
+  }
+
+  const settled = await Promise.allSettled(candidates.map((result) => resolveWithTimeout(result)));
   const streams = settled.flatMap((item) => {
     if (item.status === 'fulfilled') {
       return item.value;
@@ -196,6 +211,56 @@ export async function resolveLatinoStreams(results) {
 
   const validated = await validatePlayableStreams(unique);
   return validated.map(({ qualityRank: _qualityRank, ...stream }) => stream);
+}
+
+function prioritizeExtractorCandidates(results) {
+  return [...results].sort((left, right) => {
+    const playerComparison = playerRank(inferPlayerFromUrl(right.url)) - playerRank(inferPlayerFromUrl(left.url));
+    if (playerComparison !== 0) {
+      return playerComparison;
+    }
+
+    const sourceComparison = sourceRank(right.source) - sourceRank(left.source);
+    if (sourceComparison !== 0) {
+      return sourceComparison;
+    }
+
+    return String(left.url || '').localeCompare(String(right.url || ''));
+  });
+}
+
+function sourceRank(source) {
+  switch (source) {
+    case 'Cinecalidad':
+      return 40;
+    case 'TioPlus':
+      return 30;
+    case 'Cuevana':
+      return 20;
+    case 'HomeCine':
+      return 10;
+    default:
+      return 0;
+  }
+}
+
+async function resolveWithTimeout(result) {
+  let timeoutId;
+  try {
+    return await Promise.race([
+      resolveOne(result),
+      new Promise(resolve => {
+        timeoutId = setTimeout(() => {
+          console.warn(`[WebstreamerLatino] Extractor timed out after ${EXTRACTOR_TIMEOUT_MS}ms: ${result.url}`);
+          resolve([]);
+        }, EXTRACTOR_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 export async function resolveLatinoMediaflowTarget(targetUrl, headers = {}, options = {}) {
@@ -342,20 +407,22 @@ function inferPlayerFromUrl(url) {
 
 function playerRank(player) {
   switch (player) {
+    case 'Goodstream':
+      return 95;
+    case 'Vimeos':
+      return 92;
     case 'FileLions':
       return 90;
-    case 'Streamwish':
-      return 88;
     case 'Emturbovid':
       return 85;
+    case 'Streamwish':
+      return 75;
     case 'DoodStream':
-      return 80;
+      return 65;
     case 'Dropload':
       return 70;
     case 'Fastream':
       return 60;
-    case 'Goodstream':
-      return 58;
     case 'Mixdrop':
       return 55;
     case 'Vidora':
@@ -364,8 +431,6 @@ function playerRank(player) {
       return 40;
     case 'StreamEmbed':
       return 35;
-    case 'Vimeos':
-      return 30;
     case 'Streamtape':
       return 20;
     case 'VOE':

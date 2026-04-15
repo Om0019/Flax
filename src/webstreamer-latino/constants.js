@@ -19,3 +19,7 @@ export const SOURCE_BASES = {
   verhdlink: 'https://verhdlink.cam',
   tioplus: 'https://tioplus.app',
 };
+
+export const DEFAULT_SOURCE_TIMEOUT_MS = 4500;
+export const DEFAULT_EXTRACTOR_TIMEOUT_MS = 5000;
+export const DEFAULT_EXTRACTOR_CANDIDATE_LIMIT = 8;

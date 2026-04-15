@@ -1,6 +1,6 @@
 {
   "name": "Flax Providers",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "scrapers": [
     {
       "id": "4khdhub",
@@ -439,7 +439,7 @@
       "id": "webstreamer-latino",
       "name": "Webstreamer Latino",
       "description": "Latino subset of WebStreamr using Cuevana, CineHDPlus, HomeCine, and VerHdLink",
-      "version": "1.1.4",
+      "version": "1.1.5",
       "author": "Nuvio Team",
       "supportedTypes": [
         "movie",

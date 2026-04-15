@@ -1,5 +1,5 @@
 import cheerio from 'cheerio-without-node-native';
-import { SOURCE_BASES } from './constants.js';
+import { DEFAULT_SOURCE_TIMEOUT_MS, SOURCE_BASES } from './constants.js';
 import { fetchPage, fetchText } from './http.js';
 import { getEnvValue } from './env.js';
 import { buildEpisodeTag } from './tmdb.js';
@@ -159,35 +159,32 @@ export async function getLatinoSourceResults(tmdb, mediaType, season, episode) {
       .map(v => v.trim().toLowerCase())
       .filter(Boolean),
   );
-  const sourceTimeoutMs = Math.max(0, parseInt(getEnvValue('WEBSTREAMER_LATINO_SOURCE_TIMEOUT_MS', '0'), 10) || 0);
+  const sourceTimeoutMs = Math.max(
+    1000,
+    parseInt(getEnvValue('WEBSTREAMER_LATINO_SOURCE_TIMEOUT_MS', String(DEFAULT_SOURCE_TIMEOUT_MS)), 10) || DEFAULT_SOURCE_TIMEOUT_MS
+  );
 
-  const withTimeout = (label, promise) => {
-    if (!sourceTimeoutMs) {
-      return promise;
+  const withTimeout = async (label, promise) => {
+    let timeoutId;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise(resolve => {
+          timeoutId = setTimeout(() => {
+            console.warn(`[WebstreamerLatino] Source timed out after ${sourceTimeoutMs}ms: ${label}`);
+            resolve([]);
+          }, sourceTimeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
     }
-    return Promise.race([
-      promise,
-      new Promise(resolve => setTimeout(() => {
-        console.warn(`[WebstreamerLatino] Source timed out after ${sourceTimeoutMs}ms: ${label}`);
-        resolve([]);
-      }, sourceTimeoutMs)),
-    ]);
   };
 
-  await Promise.allSettled([
-    prewarmSource(SOURCE_BASES.cuevana),
-    prewarmSource(SOURCE_BASES.cinecalidad),
-    prewarmSource(SOURCE_BASES.tioplus),
-  ]);
-
-  const cuevanaResults = disabled.has('cuevana')
-    ? []
-    : await withTimeout('cuevana', searchCuevana(tmdb, season, episode)).catch((error) => {
-      console.error('[WebstreamerLatino] Source error:', error ? error.message : error);
-      return [];
-    });
-
   const tasks = [
+    !disabled.has('cuevana') && withTimeout('cuevana', searchCuevana(tmdb, season, episode)),
     !disabled.has('cinecalidad') && withTimeout('cinecalidad', searchCineCalidad(tmdb, normalizedMediaType, season, episode)),
     !disabled.has('homecine') && withTimeout('homecine', searchHomeCine(tmdb, season, episode)),
     !disabled.has('tioplus') && withTimeout('tioplus', searchTioPlus(tmdb, normalizedMediaType, season, episode)),
@@ -202,16 +199,7 @@ export async function getLatinoSourceResults(tmdb, mediaType, season, episode) {
 
     console.error('[WebstreamerLatino] Source error:', result.reason ? result.reason.message : result.reason);
     return [];
-  }).concat(cuevanaResults.filter((entry) => !isBlockedLatinoResult(entry)));
-}
-
-async function prewarmSource(baseUrl) {
-  await fetchPage(baseUrl, {
-    headers: {
-      Referer: baseUrl,
-      Origin: new URL(baseUrl).origin,
-    },
-  }).catch(() => null);
+  });
 }
 
 async function searchCuevana(tmdb, season, episode) {
