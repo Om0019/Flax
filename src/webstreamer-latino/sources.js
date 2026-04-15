@@ -1,6 +1,7 @@
 import cheerio from 'cheerio-without-node-native';
 import { SOURCE_BASES } from './constants.js';
 import { fetchPage, fetchText } from './http.js';
+import { getEnvValue } from './env.js';
 import { buildEpisodeTag } from './tmdb.js';
 import { normalizeTitle } from './utils.js';
 
@@ -117,12 +118,12 @@ function appendLatinoResult(results, result) {
 
 export async function getLatinoSourceResults(tmdb, mediaType, season, episode) {
   const disabled = new Set(
-    String(process.env.WEBSTREAMER_LATINO_DISABLED_SOURCES || '')
+    String(getEnvValue('WEBSTREAMER_LATINO_DISABLED_SOURCES', ''))
       .split(',')
       .map(v => v.trim().toLowerCase())
       .filter(Boolean),
   );
-  const sourceTimeoutMs = Math.max(0, parseInt(process.env.WEBSTREAMER_LATINO_SOURCE_TIMEOUT_MS || '0', 10) || 0);
+  const sourceTimeoutMs = Math.max(0, parseInt(getEnvValue('WEBSTREAMER_LATINO_SOURCE_TIMEOUT_MS', '0'), 10) || 0);
 
   const withTimeout = (label, promise) => {
     if (!sourceTimeoutMs) {

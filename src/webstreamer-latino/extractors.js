@@ -2,9 +2,10 @@ import cheerio from 'cheerio-without-node-native';
 import axios from 'axios';
 import CryptoJS from 'crypto-js';
 import { fetchJson, fetchPage, fetchText } from './http.js';
+import { getEnvValue } from './env.js';
 import { extractPackedUrl, guessHeightFromPlaylist, parseQuality, qualityRank, uniqueBy, unpackPacker } from './utils.js';
 
-const SHOULD_VALIDATE_MEDIA = process.env.NODE_ENV === 'production';
+const SHOULD_VALIDATE_MEDIA = getEnvValue('NODE_ENV') === 'production';
 
 function absoluteUrl(rawUrl, origin) {
   return new URL(rawUrl.replace(/^\/\//, 'https://'), origin).href;

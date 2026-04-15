@@ -1,8 +1,9 @@
 import axios from 'axios';
 import { DEFAULT_HEADERS } from './constants.js';
+import { getEnvValue } from './env.js';
 
 const cookieJar = new Map();
-const REQUEST_TIMEOUT_MS = Math.max(1000, parseInt(process.env.WEBSTREAMER_LATINO_HTTP_TIMEOUT_MS || '15000', 10) || 15000);
+const REQUEST_TIMEOUT_MS = Math.max(1000, parseInt(getEnvValue('WEBSTREAMER_LATINO_HTTP_TIMEOUT_MS', '15000'), 10) || 15000);
 
 function mergeHeaders(headers) {
   return { ...DEFAULT_HEADERS, ...(headers || {}) };

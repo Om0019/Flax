@@ -1,6 +1,6 @@
 /**
  * webstreamer-latino - Built from src/webstreamer-latino/
- * Generated: 2026-03-20T07:14:27.744Z
+ * Generated: 2026-04-15T20:43:36.342Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -100,8 +100,18 @@ var SOURCE_BASES = {
 
 // src/webstreamer-latino/http.js
 var import_axios = __toESM(require("axios"));
+
+// src/webstreamer-latino/env.js
+function getEnvValue(name, fallback = "") {
+  if (typeof process !== "undefined" && process && process.env && Object.prototype.hasOwnProperty.call(process.env, name)) {
+    return process.env[name];
+  }
+  return fallback;
+}
+
+// src/webstreamer-latino/http.js
 var cookieJar = /* @__PURE__ */ new Map();
-var REQUEST_TIMEOUT_MS = Math.max(1e3, parseInt(process.env.WEBSTREAMER_LATINO_HTTP_TIMEOUT_MS || "15000", 10) || 15e3);
+var REQUEST_TIMEOUT_MS = Math.max(1e3, parseInt(getEnvValue("WEBSTREAMER_LATINO_HTTP_TIMEOUT_MS", "15000"), 10) || 15e3);
 function mergeHeaders(headers) {
   return __spreadValues(__spreadValues({}, DEFAULT_HEADERS), headers || {});
 }
@@ -439,9 +449,9 @@ function appendLatinoResult(results, result) {
 function getLatinoSourceResults(tmdb, mediaType, season, episode) {
   return __async(this, null, function* () {
     const disabled = new Set(
-      String(process.env.WEBSTREAMER_LATINO_DISABLED_SOURCES || "").split(",").map((v) => v.trim().toLowerCase()).filter(Boolean)
+      String(getEnvValue("WEBSTREAMER_LATINO_DISABLED_SOURCES", "")).split(",").map((v) => v.trim().toLowerCase()).filter(Boolean)
     );
-    const sourceTimeoutMs = Math.max(0, parseInt(process.env.WEBSTREAMER_LATINO_SOURCE_TIMEOUT_MS || "0", 10) || 0);
+    const sourceTimeoutMs = Math.max(0, parseInt(getEnvValue("WEBSTREAMER_LATINO_SOURCE_TIMEOUT_MS", "0"), 10) || 0);
     const withTimeout = (label, promise) => {
       if (!sourceTimeoutMs) {
         return promise;
@@ -1026,7 +1036,7 @@ function resolveTioPlusPlayer(result) {
 var import_cheerio_without_node_native2 = __toESM(require("cheerio-without-node-native"));
 var import_axios2 = __toESM(require("axios"));
 var import_crypto_js = __toESM(require("crypto-js"));
-var SHOULD_VALIDATE_MEDIA = process.env.NODE_ENV === "production";
+var SHOULD_VALIDATE_MEDIA = getEnvValue("NODE_ENV") === "production";
 function absoluteUrl(rawUrl, origin) {
   return new URL(rawUrl.replace(/^\/\//, "https://"), origin).href;
 }
@@ -1887,14 +1897,14 @@ function resolveGoodstream(result, url) {
     }
     const playlistUrl = fileMatch[1].replace(/\\\//g, "/");
     const cookieHeader = extractInlineCookieHeader(html);
-    const streamHeaders = buildPlaybackHeaders(pageUrl, __spreadValues({
+    const streamHeaders = buildPlaybackHeaders(pageUrl, __spreadProps(__spreadValues({}, cookieHeader ? { Cookie: cookieHeader } : {}), {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
       Accept: "*/*",
       "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
       "sec-ch-ua": '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
       "sec-ch-ua-mobile": "?0",
       "sec-ch-ua-platform": '"Windows"'
-    }, cookieHeader ? { Cookie: cookieHeader } : {}));
+    }));
     const viewMatch = html.match(/\/dl\?op=view&view_id=(\d+)&hash=([a-z0-9-]+)/i);
     if (viewMatch) {
       const beaconUrl = new URL(`/dl?op=view&view_id=${viewMatch[1]}&hash=${viewMatch[2]}&adb=0`, url.origin).href;
