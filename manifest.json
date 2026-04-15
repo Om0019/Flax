@@ -1,6 +1,6 @@
 {
-  "name": "Yoru's Repo",
-  "version": "1.0.2",
+  "name": "Flax Providers",
+  "version": "1.0.3",
   "scrapers": [
     {
       "id": "4khdhub",

@@ -1,11 +1,11 @@
 services:
   - type: web
-    name: Northstar
+    name: Flax
     env: node
-    repo: https://github.com/Om0019/Northstar.git
+    repo: https://github.com/Om0019/Flax.git
     branch: main
     buildCommand: npm install --include=dev
-    startCommand: npm start
+    startCommand: npm run start:stremio
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV

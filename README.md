@@ -1,12 +1,24 @@
-# Nuvio Providers
+# Flax Nuvio Providers
 
-A collection of streaming providers plus a Stremio-compatible addon server for local or Render deployment.
+A Nuvio plugin repository: a `manifest.json` registry plus bundled provider modules under `providers/`.
+
+The Stremio-compatible addon server is still available for compatibility, but it is no longer the default workflow.
 
 📖 **[Read the Comprehensive Developer Guide](DOCUMENTATION.md)**
 
 ## Quick Start
 
-### Run The Addon Server
+### Use In Nuvio
+
+Open **Nuvio** > **Settings** > **Plugins** and add this repository manifest URL:
+
+```text
+https://raw.githubusercontent.com/Om0019/Flax/refs/heads/main/manifest.json
+```
+
+Refresh plugins, then enable the providers you want.
+
+### Local Plugin Testing
 
 ```bash
 npm start
@@ -16,11 +28,26 @@ Default local URLs:
 
 ```text
 http://127.0.0.1:7010/manifest.json
+http://127.0.0.1:7010/providers/<provider>.js
+```
+
+### Stremio Addon Server
+
+The old Stremio-compatible server is still available:
+
+```bash
+npm run start:stremio
+```
+
+Stremio server URLs:
+
+```text
+http://127.0.0.1:7010/manifest.json
 http://127.0.0.1:7010/health
 http://127.0.0.1:7010/monitor/summary
 ```
 
-### Render
+### Render For The Stremio Server
 
 The repo includes [`render.yaml`](./render.yaml). Set:
 
@@ -64,13 +91,14 @@ See [`IOS_MONITOR_APP.md`](./IOS_MONITOR_APP.md) for a minimal SwiftUI client st
 
 ```
 nuvio-providers/
-├── stremio-server.js       # Active addon entrypoint
-├── addon.config.json       # Active provider list for the addon server
+├── server.js               # Local Nuvio plugin manifest/provider server
+├── stremio-server.js       # Optional Stremio-compatible addon entrypoint
+├── addon.config.json       # Active provider list for the Stremio addon server
 ├── src/                    # Multi-file provider source folders
 │   ├── hdhub4u/
 │   └── webstreamer-latino/
 │
-├── providers/              # Provider modules consumed by the addon server
+├── providers/              # Bundled provider modules consumed by Nuvio
 │   ├── vixsrc.js
 │   ├── vidlink.js
 │   ├── uhdmovies.js
