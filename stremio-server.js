@@ -837,11 +837,24 @@ function playbackProxyTimeoutMs(url, stream = null) {
         return 30000;
     }
 
+    if (/(workers\.dev|r2\.dev|polgen\.buzz|pixeldrain)/i.test(String(url || ''))) {
+        return 30000;
+    }
+
     if (SLOW_PLAYBACK_HOST_PATTERNS.test(String(url || ''))) {
         return 30000;
     }
 
     return 10000;
+}
+
+function shouldAdvertiseByteRanges(url, session = null) {
+    const provider = String(session?.provider || '').toLowerCase();
+    if (provider === '4khdhub') {
+        return true;
+    }
+
+    return /(workers\.dev|r2\.dev|polgen\.buzz|pixeldrain)/i.test(String(url || ''));
 }
 
 function normalizeVodHlsPlaylist(playlistText) {
@@ -1273,7 +1286,7 @@ function mexicanFlagOrderPriority(stream) {
 const builder = new addonBuilder({
     id: "org.stremio.nuvio.om019",
     // bump version whenever manifest/providers change so clients reload
-    version: "61.0.7",
+    version: "61.0.8",
     name: "Northstar",
     logo: ADDON_LOGO_URL,
     resources: ["stream"],
@@ -1783,6 +1796,9 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
 
             const contentType = (resp.headers['content-type'] || '').toLowerCase();
             const isPlaylist = contentType.includes('mpegurl') || isLikelyHlsUrl(targetUrl);
+            if (!isPlaylist && shouldAdvertiseByteRanges(targetUrl, session)) {
+                res.setHeader('Accept-Ranges', 'bytes');
+            }
             if (upstreamMethod === 'HEAD') {
                 return res.end();
             }
