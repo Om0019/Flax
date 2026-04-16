@@ -42,6 +42,9 @@ const KNOWN_PLAYERS = [
     'Vimeos',
     'VidSrc',
     'Fastream',
+    '4KHDHub',
+    'FSL',
+    'PixelServer',
     'Unknown',
 ];
 const monitorState = {
@@ -532,6 +535,9 @@ function inferPlayerFromStream(stream) {
         if (/vimeos/i.test(candidate)) return 'Vimeos';
         if (/vidsrc/i.test(candidate)) return 'VidSrc';
         if (/fastream/i.test(candidate)) return 'Fastream';
+        if (/4khdhub/i.test(candidate)) return '4KHDHub';
+        if (/\bfsl\b|r2\.dev|polgen\.buzz/i.test(candidate)) return 'FSL';
+        if (/pixelserver|pixeldrain/i.test(candidate)) return 'PixelServer';
     }
 
     return normalizePlayerName(stream.player);
@@ -836,6 +842,45 @@ function playbackProxyTimeoutMs(url, stream = null) {
     }
 
     return 10000;
+}
+
+function normalizeVodHlsPlaylist(playlistText) {
+    const text = String(playlistText || '');
+    if (!text.includes('#EXTM3U') || text.includes('#EXT-X-STREAM-INF') || !text.includes('#EXTINF')) {
+        return text;
+    }
+
+    const hasPlaylistType = /^#EXT-X-PLAYLIST-TYPE:/mi.test(text);
+    const hasEndlist = /^#EXT-X-ENDLIST\s*$/mi.test(text);
+    if (hasPlaylistType && hasEndlist) {
+        return text;
+    }
+
+    const lines = text.split('\n');
+    if (!hasPlaylistType) {
+        let insertAt = 1;
+        for (let i = 1; i < lines.length; i += 1) {
+            const trimmed = lines[i].trim();
+            if (
+                trimmed.startsWith('#EXT-X-VERSION')
+                || trimmed.startsWith('#EXT-X-TARGETDURATION')
+                || trimmed.startsWith('#EXT-X-MEDIA-SEQUENCE')
+                || trimmed.startsWith('#EXT-X-DISCONTINUITY-SEQUENCE')
+                || trimmed.startsWith('#EXT-X-INDEPENDENT-SEGMENTS')
+            ) {
+                insertAt = i + 1;
+                continue;
+            }
+            break;
+        }
+        lines.splice(insertAt, 0, '#EXT-X-PLAYLIST-TYPE:VOD');
+    }
+
+    if (!hasEndlist) {
+        lines.push('#EXT-X-ENDLIST');
+    }
+
+    return lines.join('\n');
 }
 
 function extractorWrap(req, host, targetUrl, headers = {}, extraParams = {}) {
@@ -1228,7 +1273,7 @@ function mexicanFlagOrderPriority(stream) {
 const builder = new addonBuilder({
     id: "org.stremio.nuvio.om019",
     // bump version whenever manifest/providers change so clients reload
-    version: "61.0.5",
+    version: "61.0.7",
     name: "Northstar",
     logo: ADDON_LOGO_URL,
     resources: ["stream"],
@@ -1365,9 +1410,9 @@ builder.defineStreamHandler(async ({ type, id }) => {
                 player: s.player || null,
             });
 
-            const urlLower = String(s.url || '').toLowerCase();
             const providerLower = String(s.provider || '').toLowerCase();
             const nameLower = String(s.name || '').toLowerCase();
+            const shouldForceVodHls = providerLower === 'vidlink' || providerLower === 'yflix';
             const isHls = isLikelyHlsUrl(s.url, s)
                 // vixsrc often returns playlist URLs without .m3u8 extension
                 || providerLower === 'vixsrc'
@@ -1381,7 +1426,7 @@ builder.defineStreamHandler(async ({ type, id }) => {
                     { redirect_stream: 'true', sid: playbackSession.id }
                 )
                 : (isHls
-                    ? proxyWrapHls(requestContext, s.url, finalHeaders, { sid: playbackSession.id })
+                    ? proxyWrapHls(requestContext, s.url, finalHeaders, { sid: playbackSession.id, vod: shouldForceVodHls ? '1' : '' })
                     : proxyWrap(requestContext, s.url, finalHeaders, { sid: playbackSession.id }));
 
             return {
@@ -1691,6 +1736,7 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
                 ...(req.headers.accept ? { Accept: req.headers.accept } : {}),
             };
             const upstreamTimeout = playbackProxyTimeoutMs(targetUrl);
+            const forceVodHls = String(req.query.vod || '') === '1';
 
             const resp = await axios({
                 method: upstreamMethod,
@@ -1750,6 +1796,9 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
                     let sanitizedData = isMasterPlaylist
                         ? await pruneDeadHlsVariants(data, baseUrl)
                         : data;
+                    if (forceVodHls) {
+                        sanitizedData = normalizeVodHlsPlaylist(sanitizedData);
+                    }
                     const bypassNestedProxy = shouldBypassLatinoNestedProxy(baseUrl);
                     if (isMasterPlaylist && bypassNestedProxy) {
                         sanitizedData = await filterReachableHlsVariants(sanitizedData, baseUrl);
@@ -1776,10 +1825,11 @@ startServer(builder.getInterface(), { port: PORT }).then(({ server, url }) => {
                         const eurl = encodeURIComponent(urlToProxy);
                         const eheaders = encodeURIComponent(JSON.stringify(headers));
                         const sidPart = sessionId ? `&sid=${encodeURIComponent(sessionId)}` : '';
+                        const vodPart = forceVodHls ? '&vod=1' : '';
                         const prefix = requestBase(req);
                         const proxyPath = isLikelyHlsUrl(urlToProxy)
-                            ? `/proxy/hls/manifest.m3u8?url=${eurl}&headers=${eheaders}${sidPart}`
-                            : `/proxy?url=${eurl}&headers=${eheaders}${sidPart}`;
+                            ? `/proxy/hls/manifest.m3u8?url=${eurl}&headers=${eheaders}${sidPart}${vodPart}`
+                            : `/proxy?url=${eurl}&headers=${eheaders}${sidPart}${vodPart}`;
                         return prefix ? `${prefix}${proxyPath}` : proxyPath;
                     };
 

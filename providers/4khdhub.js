@@ -44,9 +44,15 @@ var __async = (__this, __arguments, generator) => {
 };
 
 // src/4khdhub/constants.js
-var BASE_URL = "https://4khdhub.fans";
+var BASE_URL = "https://4khdhub.dad";
 var TMDB_API_KEY = "439c478a771f35c05022f9feabcca01c";
 var USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36";
+var PLAYBACK_HEADERS = {
+  "User-Agent": USER_AGENT,
+  "Accept": "*/*",
+  "Referer": `${BASE_URL}/`,
+  "Origin": BASE_URL
+};
 
 // src/4khdhub/http.js
 function fetchText(_0) {
@@ -172,7 +178,7 @@ function formatBytes(val) {
 var cheerio = require("cheerio-without-node-native");
 function fetchPageUrl(name, year, isSeries) {
   return __async(this, null, function* () {
-    const searchUrl = `${BASE_URL}/?s=${encodeURIComponent(name + " " + year)}`;
+    const searchUrl = `${BASE_URL}/?s=${encodeURIComponent(name)}`;
     console.log(`[4KHDHub] Search Request URL: ${searchUrl}`);
     const html = yield fetchText(searchUrl);
     if (!html) {
@@ -198,7 +204,7 @@ function fetchPageUrl(name, year, isSeries) {
     }).filter((_, el) => {
       const movieCardTitle = $(el).find(".movie-card-title").text().replace(/\[.*?]/g, "").trim();
       const distance = levenshteinDistance(movieCardTitle.toLowerCase(), name.toLowerCase());
-      const match = distance < 5;
+      const match = distance < 5 || movieCardTitle.toLowerCase().includes(name.toLowerCase()) && distance < 16;
       console.log(`[4KHDHub] Checking: "${movieCardTitle}" (Dist: ${distance}) vs "${name}"`);
       return match;
     }).map((_, el) => {
@@ -287,9 +293,13 @@ function extractHubCloud(hubCloudUrl, baseMeta) {
     if (!redirectHtml)
       return [];
     const redirectUrlMatch = redirectHtml.match(/var url ?= ?'(.*?)'/);
-    if (!redirectUrlMatch)
+    let finalLinksUrl = redirectUrlMatch == null ? void 0 : redirectUrlMatch[1];
+    if (!finalLinksUrl) {
+      const $redirect = cheerio2.load(redirectHtml);
+      finalLinksUrl = $redirect("#download").attr("href");
+    }
+    if (!finalLinksUrl)
       return [];
-    const finalLinksUrl = redirectUrlMatch[1];
     const linksHtml = yield fetchText(finalLinksUrl, { headers: { Referer: hubCloudUrl } });
     if (!linksHtml)
       return [];
@@ -310,6 +320,9 @@ function extractHubCloud(hubCloudUrl, baseMeta) {
         results.push({
           source: "FSL",
           url: href,
+          headers: __spreadProps(__spreadValues({}, PLAYBACK_HEADERS), {
+            "Referer": finalLinksUrl
+          }),
           meta: currentMeta
         });
       } else if (text.includes("PixelServer")) {
@@ -317,6 +330,9 @@ function extractHubCloud(hubCloudUrl, baseMeta) {
         results.push({
           source: "PixelServer",
           url: pixelUrl,
+          headers: __spreadProps(__spreadValues({}, PLAYBACK_HEADERS), {
+            "Referer": finalLinksUrl
+          }),
           meta: currentMeta
         });
       }
@@ -374,8 +390,14 @@ function getStreams(tmdbId, type, season, episode) {
             title: `${link.meta.title}
 ${formatBytes(link.meta.bytes || 0)}`,
             url: link.url,
+            type: String(link.url || "").includes(".m3u8") ? "hls" : "file",
             quality: sourceResult.meta.height ? `${sourceResult.meta.height}p` : void 0,
+            headers: link.headers || PLAYBACK_HEADERS,
+            provider: "4khdhub",
+            player: link.source,
             behaviorHints: {
+              player: link.source,
+              provider: "4khdhub",
               bingeGroup: `4khdhub-${link.source}`
             }
           }));

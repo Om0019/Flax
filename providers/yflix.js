@@ -206,8 +206,8 @@ function enhanceStreamsWithQuality(streams) {
         });
     } else {
       enhancedStreams.push(s);
+      return Promise.resolve();
     }
-    return Promise.resolve();
   });
 
   return Promise.all(tasks).then(() => enhancedStreams);
@@ -326,6 +326,7 @@ function runStreamFetch(eid, title, year, mediaType, seasonNum, episodeNum, rid)
           name: 'YFlix',
           title: `${title}${year ? ` (${year})` : ''}${mediaType === 'tv' && seasonNum && episodeNum ? ` S${seasonNum}E${episodeNum}` : ''}`,
           url: preferred.masterUrl || preferred.url,
+          type: 'hls',
           quality: 'Auto',
           size: 'Unknown',
           headers: HEADERS,
