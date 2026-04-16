@@ -32,14 +32,18 @@ const activeProviders = new Set(addonConfig.activeProviders || []);
 const KNOWN_PLAYERS = [
     'DoodStream',
     'FileLions',
+    'FileMoon',
     'Mixdrop',
     'Streamtape',
     'StrP2P',
     'StreamEmbed',
     'Dropload',
     'Emturbovid',
+    'Goodstream',
     'Vidora',
     'Vimeos',
+    'Streamwish',
+    'VOE',
     'VidSrc',
     'Fastream',
     '4KHDHub',
@@ -524,6 +528,7 @@ function inferPlayerFromStream(stream) {
 
     for (const candidate of candidates) {
         if (/dood/i.test(candidate)) return 'DoodStream';
+        if (/filemoon/i.test(candidate)) return 'FileMoon';
         if (/filelions|vidhide/i.test(candidate)) return 'FileLions';
         if (/mixdrop/i.test(candidate)) return 'Mixdrop';
         if (/streamtape|strcloud/i.test(candidate)) return 'Streamtape';
@@ -531,8 +536,11 @@ function inferPlayerFromStream(stream) {
         if (/streamembed|gxplayer|bullstream|mp4player/i.test(candidate)) return 'StreamEmbed';
         if (/dropload/i.test(candidate)) return 'Dropload';
         if (/emturbovid|turbovid/i.test(candidate)) return 'Emturbovid';
+        if (/goodstream/i.test(candidate)) return 'Goodstream';
         if (/vidora|waaw/i.test(candidate)) return 'Vidora';
         if (/vimeos/i.test(candidate)) return 'Vimeos';
+        if (/streamwish|hlswish/i.test(candidate)) return 'Streamwish';
+        if (/\bvoe\b|voe\.sx|voe\./i.test(candidate)) return 'VOE';
         if (/vidsrc/i.test(candidate)) return 'VidSrc';
         if (/fastream/i.test(candidate)) return 'Fastream';
         if (/4khdhub/i.test(candidate)) return '4KHDHub';
@@ -697,13 +705,31 @@ let LAST_HOST = '';    // updated by middleware for each incoming request
 const dnsReachabilityCache = new Map();
 let latinoMediaflowModulePromise = null;
 const LATINO_ON_DEMAND_PLAYERS = new Set([
+    'doodstream',
+    'filemoon',
     'filelions',
     'emturbovid',
     'goodstream',
-    'fastream',
+    'mixdrop',
+    'streamtape',
     'vimeos',
     'streamwish',
+    'strp2p',
+    'streamembed',
     'voe',
+    'vidsrc',
+]);
+const LATINO_ON_DEMAND_HLS_PLAYERS = new Set([
+    'filelions',
+    'filemoon',
+    'emturbovid',
+    'goodstream',
+    'vimeos',
+    'streamwish',
+    'strp2p',
+    'streamembed',
+    'voe',
+    'vidsrc',
 ]);
 const LATINO_RETRY_PLAYERS = new Set([
     'fastream',
@@ -916,7 +942,7 @@ function extractorWrap(req, host, targetUrl, headers = {}, extraParams = {}) {
     });
 
     const normalizedHost = String(host || '').trim().toLowerCase();
-    const playbackPath = LATINO_ON_DEMAND_PLAYERS.has(normalizedHost)
+    const playbackPath = LATINO_ON_DEMAND_HLS_PLAYERS.has(normalizedHost)
         ? '/extractor/video/manifest.m3u8'
         : '/extractor/video';
     const path = `${playbackPath}?${query.toString()}`;
@@ -942,14 +968,6 @@ function shouldRetryLatinoPlaybackHost(host) {
 function shouldBlockStream(stream) {
     if (!stream) {
         return false;
-    }
-
-    const provider = String(stream.provider || '').toLowerCase();
-    const source = String(stream.source || '').toLowerCase();
-    const player = String(stream.player || '').toLowerCase();
-
-    if (provider === 'webstreamer-latino' && source === 'cuevana' && player === 'filelions') {
-        return true;
     }
 
     return false;
@@ -1286,7 +1304,7 @@ function mexicanFlagOrderPriority(stream) {
 const builder = new addonBuilder({
     id: "org.stremio.nuvio.om019",
     // bump version whenever manifest/providers change so clients reload
-    version: "61.0.8",
+    version: "61.0.9",
     name: "Northstar",
     logo: ADDON_LOGO_URL,
     resources: ["stream"],

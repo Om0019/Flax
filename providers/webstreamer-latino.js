@@ -1,6 +1,6 @@
 /**
  * webstreamer-latino - Built from src/webstreamer-latino/
- * Generated: 2026-04-15T21:33:59.212Z
+ * Generated: 2026-04-16T01:32:58.244Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -1212,23 +1212,65 @@ function buildStream(result, extracted) {
     qualityRank: qualityRank(quality)
   };
 }
+var DEFERRED_RESOLUTION_PLAYERS = /* @__PURE__ */ new Set([
+  "DoodStream",
+  "Emturbovid",
+  "FileLions",
+  "FileMoon",
+  "Goodstream",
+  "Mixdrop",
+  "StreamEmbed",
+  "Streamtape",
+  "Streamwish",
+  "StrP2P",
+  "VidSrc",
+  "Vimeos",
+  "VOE"
+]);
+function buildDeferredStream(result) {
+  const player = result.player || inferPlayerFromUrl(result.url);
+  return {
+    name: `${result.source} ${result.language}${player ? ` (${player})` : ""}`,
+    title: `${result.title || `${result.language} Stream`}${player ? ` [${player}]` : ""}`,
+    url: result.url,
+    quality: "Auto",
+    headers: result.headers || {},
+    provider: "webstreamer-latino",
+    source: result.source,
+    language: result.language,
+    player,
+    extractorTarget: result.url,
+    extractorHeaders: result.headers || {},
+    qualityRank: playerRank(player),
+    deferredResolution: true
+  };
+}
+function shouldDeferResolution(result) {
+  const player = result.player || inferPlayerFromUrl(result.url);
+  return DEFERRED_RESOLUTION_PLAYERS.has(player);
+}
 function resolveLatinoStreams(results) {
   return __async(this, null, function* () {
-    const candidates = prioritizeExtractorCandidates(results).slice(0, EXTRACTOR_CANDIDATE_LIMIT);
+    const candidates = prioritizeExtractorCandidates(results);
     candidates.forEach((result) => {
       const player = inferPlayerFromUrl(result.url);
       console.log(`[WebstreamerLatino] Candidate: ${result.source} -> ${result.url} -> ${player || "unknown"}`);
     });
-    if (results.length > candidates.length) {
-      console.log(`[WebstreamerLatino] Candidate cap: resolving ${candidates.length}/${results.length}`);
+    const deferredStreams = candidates.filter(shouldDeferResolution).map(buildDeferredStream);
+    const immediateCandidates = candidates.filter((result) => !shouldDeferResolution(result)).slice(0, EXTRACTOR_CANDIDATE_LIMIT);
+    if (candidates.length > immediateCandidates.length + deferredStreams.length) {
+      console.log(
+        `[WebstreamerLatino] Candidate cap: resolving ${immediateCandidates.length}/${candidates.length - deferredStreams.length} immediate candidates`
+      );
     }
-    const settled = yield Promise.allSettled(candidates.map((result) => resolveWithTimeout(result)));
-    const streams = settled.flatMap((item) => {
+    const settled = yield Promise.allSettled(immediateCandidates.map((result) => resolveWithTimeout(result)));
+    const resolvedStreams = settled.flatMap((item) => {
       if (item.status === "fulfilled") {
         return item.value;
       }
       return [];
     });
+    const streams = deferredStreams.concat(resolvedStreams);
     const unique = uniqueBy(streams, (stream) => `${stream.url}|${JSON.stringify(stream.headers || {})}`);
     unique.sort((a, b) => {
       const playerComparison = playerRank(b.player) - playerRank(a.player);
@@ -1240,9 +1282,21 @@ function resolveLatinoStreams(results) {
       }
       return a.name.localeCompare(b.name);
     });
-    const validated = yield validatePlayableStreams(unique);
-    return validated.map((_a) => {
-      var _b = _a, { qualityRank: _qualityRank } = _b, stream = __objRest(_b, ["qualityRank"]);
+    const deferred = unique.filter((stream) => stream.deferredResolution);
+    const validated = yield validatePlayableStreams(unique.filter((stream) => !stream.deferredResolution));
+    const output = deferred.concat(validated);
+    output.sort((a, b) => {
+      const playerComparison = playerRank(b.player) - playerRank(a.player);
+      if (playerComparison !== 0) {
+        return playerComparison;
+      }
+      if (b.qualityRank !== a.qualityRank) {
+        return b.qualityRank - a.qualityRank;
+      }
+      return a.name.localeCompare(b.name);
+    });
+    return output.map((_a) => {
+      var _b = _a, { qualityRank: _qualityRank, deferredResolution: _deferredResolution } = _b, stream = __objRest(_b, ["qualityRank", "deferredResolution"]);
       return stream;
     });
   });
@@ -1318,8 +1372,11 @@ function resolveOne(result) {
         console.log(`[WebstreamerLatino] Plustream skipped: ${result.url}`);
         return [];
       }
-      if (/streamwish|bysejikuar/i.test(host) || /streamwish/i.test(result.player || "")) {
+      if (/streamwish|hlswish|bysejikuar/i.test(host) || /streamwish/i.test(result.player || "")) {
         return resolveStreamwish(result, url);
+      }
+      if (/filemoon/i.test(host) || /filemoon/i.test(result.player || "")) {
+        return resolveFileMoon(result, url);
       }
       if (/voe|dianaavoidthey/i.test(host) || /voe/i.test(result.player || "")) {
         return resolveVoe(result, url);
@@ -1380,8 +1437,10 @@ function inferPlayerFromUrl(url) {
     return "Dropload";
   if (value.includes("vudeo"))
     return "Vudeo";
-  if (value.includes("streamwish") || value.includes("bysejikuar"))
+  if (value.includes("streamwish") || value.includes("hlswish") || value.includes("bysejikuar"))
     return "Streamwish";
+  if (value.includes("filemoon"))
+    return "FileMoon";
   if (value.includes("voe"))
     return "VOE";
   if (value.includes("mixdrop") || value.includes("mixdrp") || value.includes("mixdroop") || value.includes("m1xdrop"))
@@ -1426,6 +1485,8 @@ function playerRank(player) {
       return 85;
     case "Streamwish":
       return 75;
+    case "FileMoon":
+      return 72;
     case "DoodStream":
       return 65;
     case "Dropload":
@@ -1674,6 +1735,45 @@ function resolveStreamwish(result, url) {
       quality,
       headers: streamHeaders,
       player: "Streamwish"
+    })];
+  });
+}
+function resolveFileMoon(_0, _1) {
+  return __async(this, arguments, function* (result, url, originalUrl = url) {
+    var _a;
+    const normalized = new URL(url.href.replace("/e/", "/d/"));
+    const headers = __spreadProps(__spreadValues({}, result.headers || {}), {
+      Referer: result.referer || normalized.href
+    });
+    const page = yield fetchPage(normalized.href, { headers }).catch(() => null);
+    const html = (page == null ? void 0 : page.text) || null;
+    if (!html || /Page not found/i.test(html)) {
+      console.log(`[WebstreamerLatino] FileMoon miss: ${url.href}`);
+      return [];
+    }
+    const iframeMatches = Array.from(html.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi));
+    if (iframeMatches.length) {
+      const iframeSrc = (_a = iframeMatches[iframeMatches.length - 1]) == null ? void 0 : _a[1];
+      if (iframeSrc) {
+        return resolveFileMoon(result, new URL(iframeSrc, page.url || normalized.href), originalUrl);
+      }
+    }
+    const unpacked = unpackPacker(html);
+    const playlistMatch = unpacked.match(/sources\s*:\s*\[\s*\{\s*file\s*:\s*["']([^"']+\.m3u8[^"']*)/i) || unpacked.match(/file\s*:\s*["']([^"']+\.m3u8[^"']*)/i) || unpacked.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i);
+    if (!playlistMatch) {
+      console.log(`[WebstreamerLatino] FileMoon parse miss: ${url.href}`);
+      return [];
+    }
+    const finalPageUrl = page.url || normalized.href;
+    const title = import_cheerio_without_node_native2.default.load(html)("h3").text().trim() || result.title;
+    const heightMatch = unpacked.match(/(\d{3,4})p/i);
+    const streamHeaders = buildPlaybackHeaders(originalUrl.href || finalPageUrl);
+    return [buildStream(result, {
+      title,
+      url: absoluteUrl(playlistMatch[1].replace(/\\\//g, "/"), finalPageUrl),
+      quality: heightMatch ? `${heightMatch[1]}p` : "Auto",
+      headers: streamHeaders,
+      player: "FileMoon"
     })];
   });
 }
