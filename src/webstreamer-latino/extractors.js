@@ -174,21 +174,7 @@ function buildStream(result, extracted) {
   };
 }
 
-const DEFERRED_RESOLUTION_PLAYERS = new Set([
-  'DoodStream',
-  'Emturbovid',
-  'FileLions',
-  'FileMoon',
-  'Goodstream',
-  'Mixdrop',
-  'StreamEmbed',
-  'Streamtape',
-  'Streamwish',
-  'StrP2P',
-  'VidSrc',
-  'Vimeos',
-  'VOE',
-]);
+const DEFERRED_RESOLUTION_PLAYERS = new Set();
 
 function buildDeferredStream(result) {
   const player = result.player || inferPlayerFromUrl(result.url);
@@ -517,36 +503,12 @@ function playerRank(player) {
 }
 
 function shouldProbePlayableStream(stream) {
-  const player = String(stream?.player || '').toLowerCase();
-
-  if (!player) {
-    return true;
-  }
-
-  if (player === 'filelions' || player === 'emturbovid' || player === 'vimeos' || player === 'goodstream' || player === 'voe') {
-    return false;
-  }
-
-  return [
-    'vimeos',
-    'streamwish',
-    'doodstream',
-    'mixdrop',
-    'streamtape',
-  ].includes(player);
+  return !!stream?.url;
 }
 
 async function validatePlayableStreams(streams) {
-  const maxFragileProbes = 6;
-  let fragileProbeCount = 0;
-
   const validated = await Promise.all(streams.map(async (stream) => {
     if (!shouldProbePlayableStream(stream)) {
-      return stream;
-    }
-
-    fragileProbeCount += 1;
-    if (fragileProbeCount > maxFragileProbes) {
       return null;
     }
 

@@ -1,6 +1,6 @@
 /**
  * webstreamer-latino - Built from src/webstreamer-latino/
- * Generated: 2026-04-16T01:32:58.244Z
+ * Generated: 2026-04-16T01:38:32.293Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -99,7 +99,7 @@ var SOURCE_BASES = {
 };
 var DEFAULT_SOURCE_TIMEOUT_MS = 4500;
 var DEFAULT_EXTRACTOR_TIMEOUT_MS = 5e3;
-var DEFAULT_EXTRACTOR_CANDIDATE_LIMIT = 8;
+var DEFAULT_EXTRACTOR_CANDIDATE_LIMIT = 24;
 
 // src/webstreamer-latino/env.js
 function getEnvValue(name, fallback = "") {
@@ -1212,21 +1212,7 @@ function buildStream(result, extracted) {
     qualityRank: qualityRank(quality)
   };
 }
-var DEFERRED_RESOLUTION_PLAYERS = /* @__PURE__ */ new Set([
-  "DoodStream",
-  "Emturbovid",
-  "FileLions",
-  "FileMoon",
-  "Goodstream",
-  "Mixdrop",
-  "StreamEmbed",
-  "Streamtape",
-  "Streamwish",
-  "StrP2P",
-  "VidSrc",
-  "Vimeos",
-  "VOE"
-]);
+var DEFERRED_RESOLUTION_PLAYERS = /* @__PURE__ */ new Set();
 function buildDeferredStream(result) {
   const player = result.player || inferPlayerFromUrl(result.url);
   return {
@@ -1514,31 +1500,12 @@ function playerRank(player) {
   }
 }
 function shouldProbePlayableStream(stream) {
-  const player = String((stream == null ? void 0 : stream.player) || "").toLowerCase();
-  if (!player) {
-    return true;
-  }
-  if (player === "filelions" || player === "emturbovid" || player === "vimeos" || player === "goodstream" || player === "voe") {
-    return false;
-  }
-  return [
-    "vimeos",
-    "streamwish",
-    "doodstream",
-    "mixdrop",
-    "streamtape"
-  ].includes(player);
+  return !!(stream == null ? void 0 : stream.url);
 }
 function validatePlayableStreams(streams) {
   return __async(this, null, function* () {
-    const maxFragileProbes = 6;
-    let fragileProbeCount = 0;
     const validated = yield Promise.all(streams.map((stream) => __async(this, null, function* () {
       if (!shouldProbePlayableStream(stream)) {
-        return stream;
-      }
-      fragileProbeCount += 1;
-      if (fragileProbeCount > maxFragileProbes) {
         return null;
       }
       const ok = yield probePlaybackUrl(stream.url, stream.headers);
