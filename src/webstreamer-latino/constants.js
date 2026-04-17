@@ -12,14 +12,16 @@ export const DEFAULT_HEADERS = {
 };
 
 export const SOURCE_BASES = {
+  cuevanaApi: 'https://cue.cuevana3.nu/wp-json/cuevana/v1',
   cuevana: 'https://ww1.cuevana3.is',
   cinecalidad: 'https://www.cinecalidad.am',
   cinehdplus: 'https://cinehdplus.gratis',
+  gnulahd: 'https://ww3.gnulahd.nu',
   homecine: 'https://www3.homecine.to',
   verhdlink: 'https://verhdlink.cam',
   tioplus: 'https://tioplus.app',
 };
 
-export const DEFAULT_SOURCE_TIMEOUT_MS = 4500;
+export const DEFAULT_SOURCE_TIMEOUT_MS = 7000;
 export const DEFAULT_EXTRACTOR_TIMEOUT_MS = 5000;
 export const DEFAULT_EXTRACTOR_CANDIDATE_LIMIT = 24;

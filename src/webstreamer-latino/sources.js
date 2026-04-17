@@ -1,9 +1,9 @@
 import cheerio from 'cheerio-without-node-native';
 import { DEFAULT_SOURCE_TIMEOUT_MS, SOURCE_BASES } from './constants.js';
-import { fetchPage, fetchText } from './http.js';
+import { fetchJson, fetchPage, fetchText } from './http.js';
 import { getEnvValue } from './env.js';
 import { buildEpisodeTag } from './tmdb.js';
-import { normalizeTitle } from './utils.js';
+import { normalizeTitle, uniqueBy } from './utils.js';
 
 function encodeBase64(value) {
   const input = String(value || '');
@@ -74,6 +74,67 @@ function buildSearchTerms(...values) {
   return [...terms];
 }
 
+function getTmdbTitleCandidates(tmdb) {
+  if (Array.isArray(tmdb?._searchTitleCandidates) && tmdb._searchTitleCandidates.length) {
+    return uniqueBy(
+      tmdb._searchTitleCandidates
+        .map((value) => String(value || '').trim())
+        .filter(Boolean),
+      (value) => normalizeTitle(value)
+    );
+  }
+
+  return uniqueBy(
+    [
+      tmdb?.title,
+      ...(Array.isArray(tmdb?.translatedTitles) ? tmdb.translatedTitles : []),
+      tmdb?.originalTitle,
+    ]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean),
+    (value) => normalizeTitle(value)
+  );
+}
+
+function buildFallbackEnglishTmdb(tmdb) {
+  const fallbackCandidates = uniqueBy(
+    [
+      tmdb?.originalTitle,
+      tmdb?.title,
+      ...(Array.isArray(tmdb?.translatedTitles) ? tmdb.translatedTitles : []),
+    ]
+      .map((value) => String(value || '').trim())
+      .filter(Boolean),
+    (value) => normalizeTitle(value)
+  );
+
+  return {
+    ...tmdb,
+    _searchTitleCandidates: fallbackCandidates,
+  };
+}
+
+function buildTmdbSearchTerms(tmdb, ...extraValues) {
+  return buildSearchTerms(...extraValues, ...getTmdbTitleCandidates(tmdb));
+}
+
+function scoreTmdbCandidate(tmdb, rawTitle, matchedYear) {
+  return getTmdbTitleCandidates(tmdb).reduce((best, candidate) => (
+    Math.max(best, scoreSearchCandidate(candidate, rawTitle, tmdb.year, matchedYear))
+  ), 0);
+}
+
+function slugifyCuevanaApi(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/['".:!?(),[\]{}]/g, ' ')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 function scoreSearchCandidate(targetTitle, rawTitle, expectedYear, matchedYear) {
   const targetNorm = normalizeTitle(targetTitle);
   const rawNorm = normalizeTitle(rawTitle);
@@ -128,6 +189,7 @@ function inferBlockedLatinoPlayer(value) {
   if (text.includes('dropload') || text.includes('dr0pstream')) return 'Dropload';
   if (text.includes('vudeo')) return 'Vudeo';
   if (text.includes('waaw') || text.includes('vidora')) return 'Vidora';
+  if (text.includes('vidsonic')) return 'VidSonic';
   if (text.includes('plustream')) return 'Plustream';
 
   return null;
@@ -152,6 +214,17 @@ function appendLatinoResult(results, result) {
 }
 
 export async function getLatinoSourceResults(tmdb, mediaType, season, episode) {
+  const flattenSettledResults = (settled) => (
+    settled.flatMap((result) => {
+      if (result.status === 'fulfilled') {
+        return result.value.filter((entry) => !isBlockedLatinoResult(entry));
+      }
+
+      console.error('[WebstreamerLatino] Source error:', result.reason ? result.reason.message : result.reason);
+      return [];
+    })
+  );
+
   const normalizedMediaType = tmdb.mediaType || (mediaType === 'series' ? 'tv' : mediaType);
   const disabled = new Set(
     String(getEnvValue('WEBSTREAMER_LATINO_DISABLED_SOURCES', ''))
@@ -183,27 +256,174 @@ export async function getLatinoSourceResults(tmdb, mediaType, season, episode) {
     }
   };
 
-  const tasks = [
-    !disabled.has('cuevana') && withTimeout('cuevana', searchCuevana(tmdb, season, episode)),
-    !disabled.has('cinecalidad') && withTimeout('cinecalidad', searchCineCalidad(tmdb, normalizedMediaType, season, episode)),
-    !disabled.has('homecine') && withTimeout('homecine', searchHomeCine(tmdb, season, episode)),
-    !disabled.has('tioplus') && withTimeout('tioplus', searchTioPlus(tmdb, normalizedMediaType, season, episode)),
-  ].filter(Boolean);
+  const runSourceSearch = async (searchTmdb) => {
+    const cuevanaApiTask = !disabled.has('cuevana-api')
+      ? withTimeout('cuevana-api', searchCuevanaApi(searchTmdb, normalizedMediaType, season, episode))
+      : Promise.resolve([]);
 
-  const settled = await Promise.allSettled(tasks);
+    const secondaryTasks = [
+      !disabled.has('cinecalidad') && withTimeout('cinecalidad', searchCineCalidad(searchTmdb, normalizedMediaType, season, episode)),
+      !disabled.has('gnulahd') && withTimeout('gnulahd', searchGnulaHd(searchTmdb, normalizedMediaType, season, episode)),
+      !disabled.has('homecine') && withTimeout('homecine', searchHomeCine(searchTmdb, season, episode)),
+      !disabled.has('tioplus') && withTimeout('tioplus', searchTioPlus(searchTmdb, normalizedMediaType, season, episode)),
+    ].filter(Boolean);
 
-  return settled.flatMap((result) => {
-    if (result.status === 'fulfilled') {
-      return result.value.filter((entry) => !isBlockedLatinoResult(entry));
+    const [cuevanaApiResults, secondarySettled] = await Promise.all([
+      cuevanaApiTask,
+      Promise.allSettled(secondaryTasks),
+    ]);
+    const secondaryResults = flattenSettledResults(secondarySettled);
+
+    if (cuevanaApiResults.length > 0 || disabled.has('cuevana')) {
+      return cuevanaApiResults.concat(secondaryResults);
     }
 
-    console.error('[WebstreamerLatino] Source error:', result.reason ? result.reason.message : result.reason);
+    const cuevanaResults = await withTimeout('cuevana', searchCuevana(searchTmdb, season, episode))
+      .catch((error) => {
+        console.error('[WebstreamerLatino] Source error:', error ? error.message : error);
+        return [];
+      });
+
+    return cuevanaResults.concat(secondaryResults);
+  };
+
+  const primaryResults = await runSourceSearch(tmdb);
+  if (primaryResults.length > 0) {
+    return primaryResults;
+  }
+
+  const fallbackTmdb = buildFallbackEnglishTmdb(tmdb);
+  const primaryCandidates = getTmdbTitleCandidates(tmdb);
+  const fallbackCandidates = getTmdbTitleCandidates(fallbackTmdb);
+
+  if (primaryCandidates.join('|') === fallbackCandidates.join('|')) {
+    return primaryResults;
+  }
+
+  console.log(`[WebstreamerLatino] No streams found with primary titles, retrying with original title order: ${fallbackCandidates.join(' | ')}`);
+  return runSourceSearch(fallbackTmdb);
+}
+
+async function searchCuevanaApi(tmdb, mediaType, season, episode) {
+  const postId = await findCuevanaApiPostId(tmdb);
+  if (!postId) {
     return [];
+  }
+
+  if (mediaType === 'tv' && season && episode) {
+    return searchCuevanaApiEpisode(tmdb, postId, season, episode);
+  }
+
+  return searchCuevanaApiMovie(tmdb, postId, mediaType);
+}
+
+async function findCuevanaApiPostId(tmdb) {
+  const year = String(tmdb.year || '').trim();
+  const slugCandidates = uniqueBy(
+    buildTmdbSearchTerms(tmdb).flatMap((term) => {
+      const base = slugifyCuevanaApi(term);
+      if (!base) {
+        return [];
+      }
+
+      return year ? [base, `${base}-${year}`] : [base];
+    }),
+    (value) => value
+  );
+
+  for (const slug of slugCandidates) {
+    const lookupUrl = `${SOURCE_BASES.cuevanaApi}/get_post_id/${encodeURIComponent(slug)}`;
+    const payload = await fetchJson(lookupUrl, {
+      headers: { Referer: 'https://cue.cuevana3.nu/' },
+    }).catch(() => null);
+    const postId = parseInt(payload?.data, 10);
+
+    if (postId) {
+      return postId;
+    }
+  }
+
+  return null;
+}
+
+function normalizeCuevanaApiAudio(audio) {
+  const value = String(audio || '').toLowerCase();
+
+  if (value.includes('latin')) {
+    return languageMeta('mx');
+  }
+
+  if (value.includes('cast') || value.includes('spanish') || value.includes('espanol')) {
+    return languageMeta('es');
+  }
+
+  return null;
+}
+
+function mapCuevanaApiEmbeds(tmdb, embeds, referer, season, episode) {
+  const results = [];
+
+  (Array.isArray(embeds) ? embeds : []).forEach((embed) => {
+    const language = normalizeCuevanaApiAudio(embed?.audio);
+    const rawUrl = String(embed?.url || '').trim();
+    if (!language || !rawUrl) {
+      return;
+    }
+
+    appendLatinoResult(results, {
+      source: 'CuevanaAPI',
+      ...language,
+      title: buildTitle(tmdb, season, episode),
+      url: rawUrl.replace(/^(https:)?\/\//, 'https://'),
+      referer,
+      headers: { Referer: referer },
+    });
   });
+
+  return results;
+}
+
+async function searchCuevanaApiEpisode(tmdb, postId, season, episode) {
+  const endpoint = `${SOURCE_BASES.cuevanaApi}/episode/${postId}/${parseInt(season, 10)}/${parseInt(episode, 10)}`;
+  const payload = await fetchJson(endpoint, {
+    headers: { Referer: 'https://cue.cuevana3.nu/' },
+  }).catch(() => null);
+
+  if (!payload?.data) {
+    return [];
+  }
+
+  const refererSlug = payload.data.slug
+    ? `https://cue.cuevana3.nu${payload.data.slug}`
+    : 'https://cue.cuevana3.nu/';
+
+  return mapCuevanaApiEmbeds(tmdb, payload.data.embeds, refererSlug, season, episode);
+}
+
+async function searchCuevanaApiMovie(tmdb, postId, mediaType) {
+  if (mediaType !== 'movie') {
+    return [];
+  }
+
+  const payload = await fetchJson(`${SOURCE_BASES.cuevanaApi}/player/${postId}`, {
+    headers: { Referer: 'https://cue.cuevana3.nu/' },
+  }).catch(() => null);
+
+  if (!payload?.data?.embeds) {
+    return [];
+  }
+
+  return mapCuevanaApiEmbeds(
+    tmdb,
+    payload.data.embeds,
+    `https://cue.cuevana3.nu/peliculas-online/${postId}/`,
+    null,
+    null
+  );
 }
 
 async function searchCuevana(tmdb, season, episode) {
-  const searchTerms = buildSearchTerms(tmdb.originalTitle, tmdb.title);
+  const searchTerms = buildTmdbSearchTerms(tmdb);
   let pagePath = null;
 
   for (const searchTerm of searchTerms) {
@@ -229,7 +449,10 @@ async function searchCuevana(tmdb, season, episode) {
       }
 
       const year = $(card).find('.Year, .Date').first().text().trim();
-      const score = scoreSearchCandidate(searchTerm, title, tmdb.year, year);
+        const score = Math.max(
+          scoreSearchCandidate(searchTerm, title, tmdb.year, year),
+          scoreTmdbCandidate(tmdb, title, year)
+        );
 
       if (score > bestScore) {
         bestScore = score;
@@ -343,7 +566,7 @@ async function searchCineHdPlus(tmdb, mediaType, season, episode) {
 async function findCineHdPlusSeriesPage(tmdb, season, episode) {
   const searchTerms = [
     tmdb.tmdbId,
-    ...buildSearchTerms(tmdb.originalTitle, tmdb.title),
+    ...buildTmdbSearchTerms(tmdb),
   ].filter(Boolean);
   const targetEpisode = `${season}x${episode}`;
   const seen = new Set();
@@ -364,7 +587,7 @@ async function findCineHdPlusSeriesPage(tmdb, season, episode) {
 
       seen.add(href);
       const rawTitle = $(el).text().replace(/\s+/g, ' ').trim();
-      const score = scoreSearchCandidate(tmdb.title, rawTitle, tmdb.year, null);
+      const score = scoreTmdbCandidate(tmdb, rawTitle, null);
 
       candidates.push({
         href,
@@ -406,7 +629,7 @@ async function searchCineCalidad(tmdb, mediaType, season, episode) {
   }
 
   const pageUrl = await findCineCalidadPage(
-    buildSearchTerms(tmdb.title, tmdb.originalTitle),
+    buildTmdbSearchTerms(tmdb),
     findCineCalidadMovie,
     tmdb.year
   );
@@ -420,7 +643,7 @@ async function searchCineCalidad(tmdb, mediaType, season, episode) {
 
 async function searchCineCalidadSeries(tmdb, season, episode) {
   const seriesUrl = await findCineCalidadPage(
-    buildSearchTerms(tmdb.title, tmdb.originalTitle),
+    buildTmdbSearchTerms(tmdb),
     findCineCalidadSeries,
     tmdb.year
   );
@@ -480,7 +703,7 @@ async function extractCineCalidadPlayers(tmdb, pageUrl, season, episode) {
 }
 
 async function searchHomeCine(tmdb, season, episode) {
-  const candidateNames = [tmdb.title, tmdb.originalTitle].filter(Boolean);
+  const candidateNames = getTmdbTitleCandidates(tmdb);
   let pageUrl = null;
 
   for (const candidate of candidateNames) {
@@ -539,6 +762,192 @@ async function searchHomeCine(tmdb, season, episode) {
       url: iframeSrc,
       referer: pageUrl,
       headers: { Referer: pageUrl },
+    });
+  });
+
+  return results;
+}
+
+async function searchGnulaHd(tmdb, mediaType, season, episode) {
+  if (mediaType === 'tv' && season && episode) {
+    return searchGnulaHdSeries(tmdb, season, episode);
+  }
+
+  if (mediaType !== 'movie') {
+    return [];
+  }
+
+  const pageUrl = await findGnulaHdTitlePage(tmdb, false);
+  if (!pageUrl) {
+    return [];
+  }
+
+  return extractGnulaHdPlayers(tmdb, pageUrl, null, null);
+}
+
+async function searchGnulaHdSeries(tmdb, season, episode) {
+  const seriesUrl = await findGnulaHdTitlePage(tmdb, true);
+  if (!seriesUrl) {
+    return [];
+  }
+
+  const seriesHtml = await fetchText(seriesUrl, {
+    headers: { Referer: SOURCE_BASES.gnulahd },
+  });
+  const episodeUrl = extractGnulaHdEpisodeUrl(seriesHtml, season, episode);
+  if (!episodeUrl) {
+    return [];
+  }
+
+  return extractGnulaHdPlayers(tmdb, episodeUrl, season, episode);
+}
+
+async function findGnulaHdTitlePage(tmdb, expectSeries) {
+  const searchTerms = buildTmdbSearchTerms(tmdb);
+  let best = null;
+  const seen = new Set();
+
+  for (const term of searchTerms) {
+    const searchUrl = `${SOURCE_BASES.gnulahd}/?s=${encodeURIComponent(term)}`;
+    const html = await fetchText(searchUrl, {
+      headers: { Referer: SOURCE_BASES.gnulahd },
+    }).catch(() => null);
+
+    if (!html) {
+      continue;
+    }
+
+    const $ = cheerio.load(html);
+
+    $('a.series[href*="/ver/"]').each((_, el) => {
+      const href = $(el).attr('href');
+      if (!href || seen.has(href)) {
+        return;
+      }
+
+      seen.add(href);
+
+      const url = new URL(href, SOURCE_BASES.gnulahd).href;
+      const slug = url.replace(/\/+$/, '').split('/').pop() || '';
+      const rawTitle = [
+        $(el).attr('title'),
+        $(el).find('img[alt]').attr('alt'),
+        $(el).text(),
+        slug.replace(/-/g, ' '),
+      ].find(Boolean) || '';
+
+      const score = scoreTmdbCandidate(tmdb, rawTitle, null);
+      const isSeriesUrl = /\/ver\/(?:series|anime)\//i.test(url) || (!expectSeries ? false : true);
+
+      // Search pages mostly expose canonical /ver/<slug>/ links for all content,
+      // so only reject obvious mismatches and otherwise rely on episode discovery.
+      if (expectSeries && /\/ver\/peliculas\//i.test(url)) {
+        return;
+      }
+
+      if (!best || score > best.score || (score === best.score && isSeriesUrl && !best.isSeriesUrl)) {
+        best = { url, score, isSeriesUrl };
+      }
+    });
+  }
+
+  return best && best.score >= 4 ? best.url : null;
+}
+
+function extractGnulaHdEpisodeUrl(seriesHtml, season, episode) {
+  const $ = cheerio.load(seriesHtml);
+  const seasonNumber = parseInt(season, 10);
+  const episodeNumber = parseInt(episode, 10);
+  const targetTags = [
+    `${seasonNumber}x${episodeNumber}`,
+    `${seasonNumber}x${String(episodeNumber).padStart(2, '0')}`,
+  ].map((value) => value.toLowerCase());
+
+  const href = $('a[href]').map((_, el) => $(el).attr('href')).get().find((value) => {
+    const normalized = String(value || '').toLowerCase();
+    return targetTags.some((targetTag) => normalized.includes(`-${targetTag}/`) || normalized.endsWith(`-${targetTag}`));
+  });
+
+  return href ? new URL(href, SOURCE_BASES.gnulahd).href : null;
+}
+
+function extractGnulaHdServerPayload(html) {
+  const scripts = [
+    html.match(/var\s+_gnpv_ep_langs\s*=\s*(\[[\s\S]*?\]);/i),
+    html.match(/var\s+_gd\s*=\s*(\[[\s\S]*?\]);/i),
+  ];
+
+  for (const match of scripts) {
+    if (!match?.[1]) {
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(match[1]);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch (_error) {
+      continue;
+    }
+  }
+
+  return [];
+}
+
+function normalizeGnulaHdLanguage(entry) {
+  const label = String(entry?.label || '').toLowerCase();
+
+  if (label.includes('subtitulado')) {
+    return null;
+  }
+
+  if (label.includes('castellano')) {
+    return languageMeta('es');
+  }
+
+  if (label.includes('latino')) {
+    return languageMeta('mx');
+  }
+
+  return null;
+}
+
+async function extractGnulaHdPlayers(tmdb, pageUrl, season, episode) {
+  const html = await fetchText(pageUrl, {
+    headers: { Referer: SOURCE_BASES.gnulahd },
+  });
+  const payload = extractGnulaHdServerPayload(html);
+  const results = [];
+  const seenUrls = new Set();
+
+  payload.forEach((entry) => {
+    const language = normalizeGnulaHdLanguage(entry);
+    if (!language) {
+      return;
+    }
+    const servers = Array.isArray(entry?.servers) ? entry.servers : [];
+
+    servers.forEach((server) => {
+      const rawUrl = String(server?.src || '').trim();
+      if (!rawUrl) {
+        return;
+      }
+
+      const normalizedUrl = rawUrl.replace(/^(https:)?\/\//, 'https://');
+      if (seenUrls.has(normalizedUrl)) {
+        return;
+      }
+      seenUrls.add(normalizedUrl);
+
+      appendLatinoResult(results, {
+        source: 'GnulaHD',
+        ...language,
+        title: buildTitle(tmdb, season, episode),
+        url: normalizedUrl,
+        referer: pageUrl,
+        headers: { Referer: pageUrl },
+      });
     });
   });
 
@@ -720,7 +1129,7 @@ function normalizePlayerUrl(rawUrl, baseUrl) {
 }
 
 async function searchTioPlusSeries(tmdb, season, episode) {
-  const candidates = [tmdb.originalTitle, tmdb.title].filter(Boolean);
+  const candidates = getTmdbTitleCandidates(tmdb);
   let seriesUrl = null;
 
   for (const candidate of candidates) {
@@ -814,7 +1223,7 @@ async function searchTioPlusMovieFlow(tmdb, mediaType) {
     return [];
   }
 
-  const candidates = [tmdb.originalTitle, tmdb.title].filter(Boolean);
+  const candidates = getTmdbTitleCandidates(tmdb);
   let pageUrl = null;
 
   for (const candidate of candidates) {

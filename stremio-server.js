@@ -14,7 +14,7 @@ const STREAM_RESULT_CACHE_TTL_MS = 30 * 1000;
 const IS_PROD = process.env.NODE_ENV === 'production';
 const PUBLIC_ADDON_BASE = (process.env.ADDON_PUBLIC_URL || '').replace(/\/$/, '');
 const MONITOR_TOKEN = process.env.MONITOR_TOKEN || '';
-const DEFAULT_LOGO_URL = 'https://raw.githubusercontent.com/Om0019/Northstar/refs/heads/main/Assets/image.png';
+const DEFAULT_LOGO_URL = 'https://ww1.cuevana3.is/favicon.ico';
 const ADDON_LOGO_URL = PUBLIC_ADDON_BASE ? `${PUBLIC_ADDON_BASE}/Assets/image.png` : DEFAULT_LOGO_URL;
 const requestContextStore = new AsyncLocalStorage();
 const LOG_LIMIT = 250;
@@ -1259,8 +1259,6 @@ function extractMediaflowHeaders(query) {
 
 function streamPriority(stream) {
     switch (stream.provider) {
-        case 'netmirror':
-            return 300;
         case 'vidlink':
             return 220;
         case 'vixsrc':
@@ -1288,24 +1286,19 @@ function mexicanFlagOrderPriority(stream) {
 
     if (provider === 'webstreamer-latino' || visibleText.includes('🇲🇽')) {
         if (player === 'vimeos') return 5000;
-        if (provider === 'netmirror' && hasSpanishAudio(stream)) return 4900;
         if (player === 'filelions') return 4800;
         if (player === 'goodstream') return 4700;
         return 4600;
-    }
-
-    if (provider === 'netmirror' && hasSpanishAudio(stream)) {
-        return 4900;
     }
 
     return 0;
 }
 
 const builder = new addonBuilder({
-    id: "org.stremio.nuvio.om019",
+    id: "org.stremio.flax",
     // bump version whenever manifest/providers change so clients reload
-    version: "61.0.9",
-    name: "Northstar",
+    version: "62.0.0",
+    name: "Flax",
     logo: ADDON_LOGO_URL,
     resources: ["stream"],
     types: ["movie", "series"],

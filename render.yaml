@@ -1,11 +1,11 @@
 services:
   - type: web
-    name: Flax
+    name: flax
     env: node
     repo: https://github.com/Om0019/Flax.git
     branch: main
     buildCommand: npm install --include=dev
-    startCommand: npm run start:stremio
+    startCommand: npm start
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV

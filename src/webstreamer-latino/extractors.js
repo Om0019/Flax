@@ -5,7 +5,7 @@ import { fetchJson, fetchPage, fetchText } from './http.js';
 import { getEnvValue } from './env.js';
 import { extractPackedUrl, guessHeightFromPlaylist, parseQuality, qualityRank, uniqueBy, unpackPacker } from './utils.js';
 
-const SHOULD_VALIDATE_MEDIA = getEnvValue('NODE_ENV') === 'production';
+const SHOULD_VALIDATE_MEDIA = false;
 const EXTRACTOR_TIMEOUT_MS = Math.max(
   1000,
   parseInt(getEnvValue('WEBSTREAMER_LATINO_EXTRACTOR_TIMEOUT_MS', String(DEFAULT_EXTRACTOR_TIMEOUT_MS)), 10) || DEFAULT_EXTRACTOR_TIMEOUT_MS
@@ -64,6 +64,40 @@ function decodeBase64ToText(value) {
   }
 
   return globalThis.atob(String(value || ''));
+}
+
+function cleanExtractedTitle(value, fallback = '') {
+  const raw = String(value || '').trim();
+  const safeFallback = String(fallback || '').trim();
+
+  if (!raw) {
+    return safeFallback;
+  }
+
+  const basename = raw.replace(/\.(m3u8|mp4|mkv|avi)(\?.*)?$/i, '');
+  const encodedPrefix = basename.split('.')[0];
+
+  if (/^[A-Za-z0-9+/=_-]{16,}$/.test(encodedPrefix) && basename.includes('.')) {
+    try {
+      const decoded = decodeBase64ToText(encodedPrefix.replace(/-/g, '+').replace(/_/g, '/'));
+      if (/[A-Za-z]{3,}/.test(decoded)) {
+        return safeFallback || decoded.trim();
+      }
+    } catch (_error) {
+      return safeFallback || raw;
+    }
+  }
+
+  return basename || safeFallback;
+}
+
+function shouldKeepFallbackTitle(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return true;
+  }
+
+  return /--datq--/i.test(text) || /^\d{4,}--/.test(text);
 }
 
 function extractEmbedCode(url) {
@@ -158,9 +192,12 @@ function extractVoeRedirect(html) {
 function buildStream(result, extracted) {
   const quality = extracted.quality || parseQuality(extracted.title || extracted.url);
   const player = extracted.player || result.player || inferPlayerFromUrl(extracted.url || result.url);
+  const title = result.preserveTitle || shouldKeepFallbackTitle(extracted.title)
+    ? String(result.title || `${result.language} Stream`).trim()
+    : cleanExtractedTitle(extracted.title, result.title || `${result.language} Stream`);
   return {
     name: `${result.source} ${result.language}${player ? ` (${player})` : ''}`,
-    title: `${extracted.title || result.title || `${result.language} Stream`}${player ? ` [${player}]` : ''}`,
+    title: `${title}${player ? ` [${player}]` : ''}`,
     url: extracted.url,
     quality,
     headers: extracted.headers || result.headers || {},
@@ -246,8 +283,10 @@ export async function resolveLatinoStreams(results) {
   });
 
   const deferred = unique.filter((stream) => stream.deferredResolution);
-  const validated = await validatePlayableStreams(unique.filter((stream) => !stream.deferredResolution));
-  const output = deferred.concat(validated);
+  const immediate = unique.filter((stream) => !stream.deferredResolution);
+  const output = SHOULD_VALIDATE_MEDIA
+    ? deferred.concat(await validatePlayableStreams(immediate))
+    : deferred.concat(immediate);
 
   output.sort((a, b) => {
     const playerComparison = playerRank(b.player) - playerRank(a.player);
@@ -282,6 +321,10 @@ function prioritizeExtractorCandidates(results) {
 
 function sourceRank(source) {
   switch (source) {
+    case 'CuevanaAPI':
+      return 60;
+    case 'GnulaHD':
+      return 50;
     case 'Cinecalidad':
       return 40;
     case 'TioPlus':
@@ -385,6 +428,10 @@ async function resolveOne(result) {
 
     if (/player\.cuevana3\.eu/i.test(host)) {
       return resolveCuevanaPlayer(result, url);
+    }
+
+    if (/doo\.lat/i.test(host) && /fakeplayer\.php/i.test(url.pathname)) {
+      return resolveCuevanaFakePlayer(result, url);
     }
 
     if (/dood|do[0-9]go|doood|dooood|ds2play|ds2video|dsvplay|d0o0d|do0od|d0000d|d000d|myvidplay|vidply|all3do|doply|vide0|vvide0|d-s/i.test(host)) {
@@ -949,6 +996,39 @@ async function resolveCuevanaPlayer(result, url) {
     url: absoluteUrl(targetMatch[1], url.origin),
     referer: url.href,
     headers: { Referer: url.href },
+    preserveTitle: true,
+  });
+}
+
+async function resolveCuevanaFakePlayer(result, url) {
+  const html = await fetchText(url.href, {
+    headers: {
+      ...(result.headers || {}),
+      Referer: result.referer || 'https://cue.cuevana3.nu/',
+    },
+  }).catch(() => null);
+
+  if (!html) {
+    console.log(`[WebstreamerLatino] Cuevana fakeplayer miss: ${url.href}`);
+    return [];
+  }
+
+  const targetMatch =
+    html.match(/var\s+url\s*=\s*'([^']+)'/i) ||
+    html.match(/var\s+url\s*=\s*"([^"]+)"/i) ||
+    html.match(/window\.location\.href\s*=\s*['"]([^'"]+)['"]/i);
+
+  if (!targetMatch?.[1]) {
+    console.log(`[WebstreamerLatino] Cuevana fakeplayer parse miss: ${url.href}`);
+    return [];
+  }
+
+  return resolveOne({
+    ...result,
+    url: absoluteUrl(targetMatch[1], url.origin),
+    referer: url.href,
+    headers: { Referer: url.href },
+    preserveTitle: true,
   });
 }
 

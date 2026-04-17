@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Build script for nuvio-providers
+ * Build script for the local provider bundles
  * 
  * Bundles each provider from src/<provider>/ into a single file at providers/<provider>.js
  * 
@@ -18,7 +18,7 @@ const path = require('path');
 const srcDir = path.join(__dirname, 'src');
 const outDir = path.join(__dirname, 'providers');
 
-// Modules that the Nuvio app provides - don't bundle these
+// Keep these as externals in the bundled provider output
 const EXTERNAL_MODULES = [
     'cheerio-without-node-native',
     'react-native-cheerio',
@@ -185,4 +185,3 @@ main().catch(err => {
     console.error('Build failed:', err);
     process.exit(1);
 });
-

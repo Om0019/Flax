@@ -1,10 +1,5 @@
 {
   "activeProviders": [
-    "vixsrc",
-    "vidlink",
-    "netmirror",
-    "webstreamer-latino",
-    "yflix",
-    "4khdhub"
+    "webstreamer-latino"
   ]
 }
