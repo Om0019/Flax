@@ -1459,7 +1459,6 @@ builder.defineStreamHandler(async ({ type, id }) => {
                 url: proxiedUrl,
                 subtitles: s.subtitles || [],
                 behaviorHints: {
-                    notWebReady: true,
                     player: s.player || null,
                     provider: s.provider || null,
                 },
