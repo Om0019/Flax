@@ -1,6 +1,6 @@
 /**
  * fmovies - Built from src/fmovies/
- * Generated: 2026-04-18T19:22:20.456Z
+ * Generated: 2026-04-18T19:28:54.977Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -193,11 +193,31 @@ function sortStreams(streams) {
   };
   return [...streams].sort((left, right) => rank(right.quality) - rank(left.quality));
 }
-function getStreams(tmdbId, mediaType = "movie", season = null, episode = null) {
+function getStreams(tmdbIdOrMedia, mediaType = "movie", season = null, episode = null) {
   return __async(this, null, function* () {
     try {
-      const media = yield fetchMediaDetails(tmdbId, mediaType);
-      const results = yield Promise.all(SERVERS.map((server) => fetchFromServer(server, media, season, episode)));
+      let tmdbId;
+      let type;
+      let s;
+      let e;
+      if (typeof tmdbIdOrMedia === "object" && tmdbIdOrMedia !== null) {
+        tmdbId = tmdbIdOrMedia.tmdb_id || tmdbIdOrMedia.tmdbId;
+        type = tmdbIdOrMedia.type || tmdbIdOrMedia.mediaType || "movie";
+        s = tmdbIdOrMedia.season;
+        e = tmdbIdOrMedia.episode;
+      } else {
+        tmdbId = tmdbIdOrMedia;
+        type = mediaType;
+        s = season;
+        e = episode;
+      }
+      const normalizedMediaType = type === "series" ? "tv" : type;
+      const normalizedSeason = s == null ? null : parseInt(s, 10);
+      const normalizedEpisode = e == null ? null : parseInt(e, 10);
+      const media = yield fetchMediaDetails(tmdbId, normalizedMediaType);
+      const results = yield Promise.all(
+        SERVERS.map((server) => fetchFromServer(server, media, normalizedSeason, normalizedEpisode))
+      );
       return sortStreams(dedupeStreams(results.flat()));
     } catch (_error) {
       return [];

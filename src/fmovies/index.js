@@ -181,10 +181,33 @@ function sortStreams(streams) {
   return [...streams].sort((left, right) => rank(right.quality) - rank(left.quality));
 }
 
-async function getStreams(tmdbId, mediaType = 'movie', season = null, episode = null) {
+async function getStreams(tmdbIdOrMedia, mediaType = 'movie', season = null, episode = null) {
   try {
-    const media = await fetchMediaDetails(tmdbId, mediaType);
-    const results = await Promise.all(SERVERS.map((server) => fetchFromServer(server, media, season, episode)));
+    let tmdbId;
+    let type;
+    let s;
+    let e;
+
+    if (typeof tmdbIdOrMedia === 'object' && tmdbIdOrMedia !== null) {
+      tmdbId = tmdbIdOrMedia.tmdb_id || tmdbIdOrMedia.tmdbId;
+      type = tmdbIdOrMedia.type || tmdbIdOrMedia.mediaType || 'movie';
+      s = tmdbIdOrMedia.season;
+      e = tmdbIdOrMedia.episode;
+    } else {
+      tmdbId = tmdbIdOrMedia;
+      type = mediaType;
+      s = season;
+      e = episode;
+    }
+
+    const normalizedMediaType = type === 'series' ? 'tv' : type;
+    const normalizedSeason = s == null ? null : parseInt(s, 10);
+    const normalizedEpisode = e == null ? null : parseInt(e, 10);
+
+    const media = await fetchMediaDetails(tmdbId, normalizedMediaType);
+    const results = await Promise.all(
+      SERVERS.map((server) => fetchFromServer(server, media, normalizedSeason, normalizedEpisode)),
+    );
     return sortStreams(dedupeStreams(results.flat()));
   } catch (_error) {
     return [];
