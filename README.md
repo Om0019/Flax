@@ -26,16 +26,18 @@ http://127.0.0.1:7010/health
 
 ## Build the bundled provider
 
-`webstreamer-latino` still has source files in `src/webstreamer-latino/` and bundles to `providers/webstreamer-latino.js` for Nuvio compatibility (transpiled for Hermes).
+`flax` keeps its source files in `src/flax/` and bundles to `providers/flax.js` for Nuvio compatibility (transpiled for Hermes).
 
 ```bash
 npm run build
 ```
 
+To add another provider, create `src/<provider>/index.js` and `src/<provider>/provider.json`. The build will bundle `providers/<provider>.js` and regenerate `manifest.json` from every built provider's metadata.
+
 ## Main files
 
 - `manifest.json`: repository manifest for Nuvio/Flax
-- `providers/webstreamer-latino.js`: bundled provider for Nuvio
-- `src/webstreamer-latino/`: provider source code
+- `providers/flax.js`: bundled provider for Nuvio
+- `src/flax/`: provider source code
 - `stremio-server.js`: addon server (for Stremio)
 - `addon.config.json`: active provider list for the server

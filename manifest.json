@@ -12,7 +12,7 @@
         "movie",
         "tv"
       ],
-      "filename": "providers/webstreamer-latino.js",
+      "filename": "providers/flax.js",
       "enabled": true,
       "formats": [
         "m3u8",
@@ -27,6 +27,45 @@
         "es-419",
         "spa"
       ]
+    },
+    {
+      "id": "fmovies",
+      "name": "Fmovies",
+      "description": "Fmovies.gd streams via Videasy worker endpoints",
+      "version": "0.1.0",
+      "author": "Nuvio Team",
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
+      "filename": "providers/fmovies.js",
+      "enabled": true,
+      "formats": [
+        "m3u8"
+      ],
+      "logo": "https://www.fmovies.gd/assets/icon/favicon-32x32.png",
+      "contentLanguage": [
+        "en",
+        "hi"
+      ]
+    },
+    {
+      "id": "xprime",
+      "name": "XPrime",
+      "description": "XPrime streams via backend embed routes and worker HLS playlists",
+      "version": "1.0.0",
+      "author": "OpenAI",
+      "supportedTypes": [
+        "movie",
+        "tv"
+      ],
+      "filename": "providers/xprime.js",
+      "enabled": true,
+      "formats": [
+        "m3u8"
+      ],
+      "logo": "https://xprime.su/favicon/favicon-32.png",
+      "contentLanguage": []
     }
   ]
 }

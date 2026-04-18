@@ -17,6 +17,7 @@ const path = require('path');
 
 const srcDir = path.join(__dirname, 'src');
 const outDir = path.join(__dirname, 'providers');
+const manifestPath = path.join(__dirname, 'manifest.json');
 
 // Keep these as externals in the bundled provider output
 const EXTERNAL_MODULES = [
@@ -81,6 +82,52 @@ async function buildProvider(providerName) {
         console.error(`❌ Failed to build ${providerName}:`, err.message);
         return false;
     }
+}
+
+function loadProviderMetadata(providerName) {
+    const metadataPath = path.join(srcDir, providerName, 'provider.json');
+
+    if (!fs.existsSync(metadataPath)) {
+        console.warn(`⚠️  Skipping manifest entry for ${providerName}: no src/${providerName}/provider.json found`);
+        return null;
+    }
+
+    try {
+        const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
+        return {
+            id: metadata.id || providerName,
+            name: metadata.name || providerName,
+            description: metadata.description || `${providerName} streaming provider`,
+            version: metadata.version || '1.0.0',
+            author: metadata.author || 'Unknown',
+            supportedTypes: Array.isArray(metadata.supportedTypes) ? metadata.supportedTypes : ['movie', 'tv'],
+            filename: `providers/${providerName}.js`,
+            enabled: metadata.enabled !== false,
+            formats: Array.isArray(metadata.formats) ? metadata.formats : ['m3u8', 'mp4'],
+            logo: metadata.logo || '',
+            contentLanguage: Array.isArray(metadata.contentLanguage) ? metadata.contentLanguage : [],
+        };
+    } catch (err) {
+        console.warn(`⚠️  Skipping manifest entry for ${providerName}: invalid provider.json (${err.message})`);
+        return null;
+    }
+}
+
+function updateRepositoryManifest(providerNames) {
+    if (!fs.existsSync(manifestPath)) {
+        console.warn('⚠️  Skipping manifest update: manifest.json not found');
+        return;
+    }
+
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    const scrapers = providerNames
+        .map(loadProviderMetadata)
+        .filter(Boolean)
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+    manifest.scrapers = scrapers;
+    fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    console.log(`📝 Updated manifest.json with ${scrapers.length} scraper(s)`);
 }
 
 // Transpile a single file in providers/ (for developers writing single-file providers with async)
@@ -171,12 +218,19 @@ async function main() {
 
     let success = 0;
     let failed = 0;
+    const builtProviders = [];
 
     for (const provider of providers) {
         const result = await buildProvider(provider);
-        if (result) success++;
-        else failed++;
+        if (result) {
+            success++;
+            builtProviders.push(provider);
+        } else {
+            failed++;
+        }
     }
+
+    updateRepositoryManifest(builtProviders);
 
     console.log(`\n✨ Done! ${success} built, ${failed} skipped/failed\n`);
 }

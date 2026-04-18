@@ -950,7 +950,7 @@ function extractorWrap(req, host, targetUrl, headers = {}, extraParams = {}) {
 }
 
 function shouldResolveLatinoOnDemand(stream) {
-    if (!stream || String(stream.provider || '').toLowerCase() !== 'webstreamer-latino') {
+    if (!stream || String(stream.provider || '').toLowerCase() !== 'flax') {
         return false;
     }
 
@@ -1024,7 +1024,7 @@ function shouldMarkMexicanFlag(stream) {
     }
 
     const provider = String(stream.provider || '').toLowerCase();
-    if (provider === 'webstreamer-latino') {
+    if (provider === 'flax') {
         return true;
     }
 
@@ -1236,7 +1236,7 @@ async function filterReachableHlsVariants(playlistText, baseUrl) {
 
 async function loadLatinoMediaflowResolver() {
     if (!latinoMediaflowModulePromise) {
-        const modulePath = path.join(__dirname, 'src', 'webstreamer-latino', 'extractors.js');
+        const modulePath = path.join(__dirname, 'src', 'flax', 'extractors.js');
         latinoMediaflowModulePromise = import(pathToFileURL(modulePath).href);
     }
 
@@ -1265,7 +1265,7 @@ function streamPriority(stream) {
             return 210;
         case 'yflix':
             return 200;
-        case 'webstreamer-latino':
+        case 'flax':
             return 120;
         case 'castle':
             return -100;
@@ -1284,7 +1284,7 @@ function mexicanFlagOrderPriority(stream) {
     const player = String(stream?.player || inferPlayerFromStream(stream) || '').toLowerCase();
     const visibleText = `${stream?.name || ''} ${stream?.title || ''}`;
 
-    if (provider === 'webstreamer-latino' || visibleText.includes('🇲🇽')) {
+    if (provider === 'flax' || visibleText.includes('🇲🇽')) {
         if (player === 'vimeos') return 5000;
         if (player === 'filelions') return 4800;
         if (player === 'goodstream') return 4700;
@@ -1347,8 +1347,8 @@ builder.defineStreamHandler(async ({ type, id }) => {
     const mediaType = type === "series" ? "tv" : "movie";
     const streamCacheKey = `${type}:${id}|tmdb:${tmdbId}|cfg:${controlState.configVersion}`;
     const enabledProviders = providers.filter((provider) => providerEnabled(provider.name));
-    const cachedProviders = enabledProviders.filter((provider) => provider.name !== 'webstreamer-latino');
-    const uncachedProviders = enabledProviders.filter((provider) => provider.name === 'webstreamer-latino');
+    const cachedProviders = enabledProviders.filter((provider) => provider.name !== 'flax');
+    const uncachedProviders = enabledProviders.filter((provider) => provider.name === 'flax');
     const loadProviderStreams = async (providerList) => {
         const results = await Promise.all(
             providerList.map((provider) => withTimeout(

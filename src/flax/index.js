@@ -24,23 +24,23 @@ async function getStreams(tmdbIdOrMedia, mediaType = 'movie', season = null, epi
   const normalizedMediaType = type === 'series' ? 'tv' : type;
 
   console.log(
-    `[WebstreamerLatino] Fetching streams for TMDB ID: ${tmdbId}, Type: ${normalizedMediaType}` +
+    `[Flax] Fetching streams for TMDB ID: ${tmdbId}, Type: ${normalizedMediaType}` +
     (normalizedSeason && normalizedEpisode ? `, S${normalizedSeason}E${normalizedEpisode}` : ''),
   );
 
   try {
     const tmdb = await getTmdbInfo(tmdbId, normalizedMediaType);
-    console.log(`[WebstreamerLatino] TMDB Info: "${tmdb.title}" (${tmdb.year || 'N/A'})`);
+    console.log(`[Flax] TMDB Info: "${tmdb.title}" (${tmdb.year || 'N/A'})`);
 
     const sourceResults = await getLatinoSourceResults(tmdb, normalizedMediaType, normalizedSeason, normalizedEpisode);
-    console.log(`[WebstreamerLatino] Candidate source URLs: ${sourceResults.length}`);
+    console.log(`[Flax] Candidate source URLs: ${sourceResults.length}`);
 
     const streams = await resolveLatinoStreams(sourceResults);
-    console.log(`[WebstreamerLatino] Final streams: ${streams.length}`);
+    console.log(`[Flax] Final streams: ${streams.length}`);
 
     return streams;
   } catch (error) {
-    console.error('[WebstreamerLatino] getStreams error:', error.message);
+    console.error('[Flax] getStreams error:', error.message);
     return [];
   }
 }

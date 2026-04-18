@@ -1,6 +1,6 @@
 /**
- * webstreamer-latino - Built from src/webstreamer-latino/
- * Generated: 2026-04-17T20:56:38.216Z
+ * flax - Built from src/flax/
+ * Generated: 2026-04-18T19:17:24.677Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -74,10 +74,10 @@ var __async = (__this, __arguments, generator) => {
   });
 };
 
-// src/webstreamer-latino/sources.js
+// src/flax/sources.js
 var import_cheerio_without_node_native = __toESM(require("cheerio-without-node-native"));
 
-// src/webstreamer-latino/constants.js
+// src/flax/constants.js
 var TMDB_API_KEY = "439c478a771f35c05022f9feabcca01c";
 var TMDB_BASE_URL = "https://api.themoviedb.org/3";
 var DEFAULT_HEADERS = {
@@ -103,7 +103,7 @@ var DEFAULT_SOURCE_TIMEOUT_MS = 7e3;
 var DEFAULT_EXTRACTOR_TIMEOUT_MS = 5e3;
 var DEFAULT_EXTRACTOR_CANDIDATE_LIMIT = 24;
 
-// src/webstreamer-latino/env.js
+// src/flax/env.js
 function getEnvValue(name, fallback = "") {
   if (typeof process !== "undefined" && process && process.env && Object.prototype.hasOwnProperty.call(process.env, name)) {
     return process.env[name];
@@ -111,7 +111,7 @@ function getEnvValue(name, fallback = "") {
   return fallback;
 }
 
-// src/webstreamer-latino/http.js
+// src/flax/http.js
 var cookieJar = /* @__PURE__ */ new Map();
 var REQUEST_TIMEOUT_MS = Math.max(1e3, parseInt(getEnvValue("WEBSTREAMER_LATINO_HTTP_TIMEOUT_MS", "15000"), 10) || 15e3);
 function timeoutSignal(ms) {
@@ -261,7 +261,7 @@ function fetchJson(_0) {
   });
 }
 
-// src/webstreamer-latino/tmdb.js
+// src/flax/tmdb.js
 function normalizeMediaType(mediaType) {
   return mediaType === "tv" || mediaType === "series" ? "tv" : "movie";
 }
@@ -296,7 +296,7 @@ function buildEpisodeTag(season, episode) {
   return `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`;
 }
 
-// src/webstreamer-latino/utils.js
+// src/flax/utils.js
 function normalizeTitle(value) {
   return String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
 }
@@ -390,7 +390,7 @@ function guessHeightFromPlaylist(_0) {
   });
 }
 
-// src/webstreamer-latino/sources.js
+// src/flax/sources.js
 function encodeBase64(value) {
   const input = String(value || "");
   if (typeof Buffer !== "undefined") {
@@ -556,7 +556,7 @@ function getLatinoSourceResults(tmdb, mediaType, season, episode) {
       if (result.status === "fulfilled") {
         return result.value.filter((entry) => !isBlockedLatinoResult(entry));
       }
-      console.error("[WebstreamerLatino] Source error:", result.reason ? result.reason.message : result.reason);
+      console.error("[Flax] Source error:", result.reason ? result.reason.message : result.reason);
       return [];
     });
     const normalizedMediaType = tmdb.mediaType || (mediaType === "series" ? "tv" : mediaType);
@@ -574,7 +574,7 @@ function getLatinoSourceResults(tmdb, mediaType, season, episode) {
           promise,
           new Promise((resolve) => {
             timeoutId = setTimeout(() => {
-              console.warn(`[WebstreamerLatino] Source timed out after ${sourceTimeoutMs}ms: ${label}`);
+              console.warn(`[Flax] Source timed out after ${sourceTimeoutMs}ms: ${label}`);
               resolve([]);
             }, sourceTimeoutMs);
           })
@@ -602,7 +602,7 @@ function getLatinoSourceResults(tmdb, mediaType, season, episode) {
         return cuevanaApiResults.concat(secondaryResults);
       }
       const cuevanaResults = yield withTimeout("cuevana", searchCuevana(searchTmdb, season, episode)).catch((error) => {
-        console.error("[WebstreamerLatino] Source error:", error ? error.message : error);
+        console.error("[Flax] Source error:", error ? error.message : error);
         return [];
       });
       return cuevanaResults.concat(secondaryResults);
@@ -617,7 +617,7 @@ function getLatinoSourceResults(tmdb, mediaType, season, episode) {
     if (primaryCandidates.join("|") === fallbackCandidates.join("|")) {
       return primaryResults;
     }
-    console.log(`[WebstreamerLatino] No streams found with primary titles, retrying with original title order: ${fallbackCandidates.join(" | ")}`);
+    console.log(`[Flax] No streams found with primary titles, retrying with original title order: ${fallbackCandidates.join(" | ")}`);
     return runSourceSearch(fallbackTmdb);
   });
 }
@@ -1415,7 +1415,7 @@ function resolveTioPlusPlayer(result) {
   });
 }
 
-// src/webstreamer-latino/extractors.js
+// src/flax/extractors.js
 var import_cheerio_without_node_native2 = __toESM(require("cheerio-without-node-native"));
 var import_crypto_js = __toESM(require("crypto-js"));
 var SHOULD_VALIDATE_MEDIA = false;
@@ -1569,7 +1569,7 @@ function buildStream(result, extracted) {
     url: extracted.url,
     quality,
     headers: extracted.headers || result.headers || {},
-    provider: "webstreamer-latino",
+    provider: "flax",
     source: result.source,
     language: result.language,
     player,
@@ -1587,7 +1587,7 @@ function buildDeferredStream(result) {
     url: result.url,
     quality: "Auto",
     headers: result.headers || {},
-    provider: "webstreamer-latino",
+    provider: "flax",
     source: result.source,
     language: result.language,
     player,
@@ -1606,13 +1606,13 @@ function resolveLatinoStreams(results) {
     const candidates = prioritizeExtractorCandidates(results);
     candidates.forEach((result) => {
       const player = inferPlayerFromUrl(result.url);
-      console.log(`[WebstreamerLatino] Candidate: ${result.source} -> ${result.url} -> ${player || "unknown"}`);
+      console.log(`[Flax] Candidate: ${result.source} -> ${result.url} -> ${player || "unknown"}`);
     });
     const deferredStreams = candidates.filter(shouldDeferResolution).map(buildDeferredStream);
     const immediateCandidates = candidates.filter((result) => !shouldDeferResolution(result)).slice(0, EXTRACTOR_CANDIDATE_LIMIT);
     if (candidates.length > immediateCandidates.length + deferredStreams.length) {
       console.log(
-        `[WebstreamerLatino] Candidate cap: resolving ${immediateCandidates.length}/${candidates.length - deferredStreams.length} immediate candidates`
+        `[Flax] Candidate cap: resolving ${immediateCandidates.length}/${candidates.length - deferredStreams.length} immediate candidates`
       );
     }
     const settled = yield Promise.allSettled(immediateCandidates.map((result) => resolveWithTimeout(result)));
@@ -1692,7 +1692,7 @@ function resolveWithTimeout(result) {
         resolveOne(result),
         new Promise((resolve) => {
           timeoutId = setTimeout(() => {
-            console.warn(`[WebstreamerLatino] Extractor timed out after ${EXTRACTOR_TIMEOUT_MS}ms: ${result.url}`);
+            console.warn(`[Flax] Extractor timed out after ${EXTRACTOR_TIMEOUT_MS}ms: ${result.url}`);
             resolve([]);
           }, EXTRACTOR_TIMEOUT_MS);
         })
@@ -1713,19 +1713,19 @@ function resolveOne(result) {
         return [buildStream(result, { url: url.href, player: inferPlayerFromUrl(url.href) })];
       }
       if (/supervideo/i.test(host)) {
-        console.log(`[WebstreamerLatino] SuperVideo skipped: ${result.url}`);
+        console.log(`[Flax] SuperVideo skipped: ${result.url}`);
         return [];
       }
       if (/dropload|dr0pstream/i.test(host)) {
-        console.log(`[WebstreamerLatino] Dropload skipped: ${result.url}`);
+        console.log(`[Flax] Dropload skipped: ${result.url}`);
         return [];
       }
       if (/vudeo/i.test(host)) {
-        console.log(`[WebstreamerLatino] Vudeo skipped: ${result.url}`);
+        console.log(`[Flax] Vudeo skipped: ${result.url}`);
         return [];
       }
       if (/plustream/i.test(result.player || "")) {
-        console.log(`[WebstreamerLatino] Plustream skipped: ${result.url}`);
+        console.log(`[Flax] Plustream skipped: ${result.url}`);
         return [];
       }
       if (/streamwish|hlswish|bysejikuar/i.test(host) || /streamwish/i.test(result.player || "")) {
@@ -1759,14 +1759,14 @@ function resolveOne(result) {
         return resolveStreamtape(result, url);
       }
       if (/fastream/i.test(host)) {
-        console.log(`[WebstreamerLatino] Fastream skipped: ${result.url}`);
+        console.log(`[Flax] Fastream skipped: ${result.url}`);
         return [];
       }
       if (/goodstream/i.test(host)) {
         return resolveGoodstream(result, url);
       }
       if (/waaw|vidora/i.test(host)) {
-        console.log(`[WebstreamerLatino] Vidora skipped: ${result.url}`);
+        console.log(`[Flax] Vidora skipped: ${result.url}`);
         return [];
       }
       if (/strp2p|4meplayer|upns\.pro|p2pplay/i.test(host)) {
@@ -1781,7 +1781,7 @@ function resolveOne(result) {
       if (/vidsrc|vsrc/i.test(host)) {
         return resolveVidSrc(result, url);
       }
-      console.log(`[WebstreamerLatino] Unsupported host: ${result.url}`);
+      console.log(`[Flax] Unsupported host: ${result.url}`);
       return [];
     } catch (_error) {
       return [];
@@ -1883,7 +1883,7 @@ function validatePlayableStreams(streams) {
       }
       const ok = yield probePlaybackUrl(stream.url, stream.headers);
       if (!ok) {
-        console.log(`[WebstreamerLatino] playback probe failed: ${stream.player} -> ${stream.url}`);
+        console.log(`[Flax] playback probe failed: ${stream.player} -> ${stream.url}`);
         return null;
       }
       return stream;
@@ -1968,7 +1968,7 @@ function resolveMixdrop(result, url) {
       (_d = filePage == null ? void 0 : filePage.headers) == null ? void 0 : _d["set-cookie"]
     );
     if (!html || /can't find the (file|video)/i.test(html)) {
-      console.log(`[WebstreamerLatino] Mixdrop miss: ${url.href}`);
+      console.log(`[Flax] Mixdrop miss: ${url.href}`);
       return [];
     }
     let directValue = extractPackedUrl(html, [
@@ -2007,7 +2007,7 @@ function resolveMixdrop(result, url) {
       }
     }
     if (!directValue || /^\/e\//.test(directValue)) {
-      console.log(`[WebstreamerLatino] Mixdrop parse miss: ${url.href}`);
+      console.log(`[Flax] Mixdrop parse miss: ${url.href}`);
       return [];
     }
     const directUrl = absoluteUrl(directValue, normalized.origin);
@@ -2020,7 +2020,7 @@ function resolveMixdrop(result, url) {
     }
     const isPlayable = !SHOULD_VALIDATE_MEDIA || (yield validateDirectMedia(directUrl, streamHeaders));
     if (!isPlayable) {
-      console.log(`[WebstreamerLatino] Mixdrop blocked: ${url.href}`);
+      console.log(`[Flax] Mixdrop blocked: ${url.href}`);
       return [];
     }
     return [buildStream(result, {
@@ -2037,7 +2037,7 @@ function resolveStreamwish(result, url) {
     const embedUrl = new URL(url.href.replace("/f/", "/e/"));
     const code = extractEmbedCode(embedUrl);
     if (!code) {
-      console.log(`[WebstreamerLatino] Streamwish miss: ${url.href}`);
+      console.log(`[Flax] Streamwish miss: ${url.href}`);
       return [];
     }
     const requestHeaders = __spreadProps(__spreadValues(__spreadValues({}, result.headers || {}), buildPlaybackHeaders(embedUrl.href)), {
@@ -2050,7 +2050,7 @@ function resolveStreamwish(result, url) {
     const media = yield decryptStreamwishPayload((playback == null ? void 0 : playback.playback) || playback).catch(() => null);
     const sources = Array.isArray(media == null ? void 0 : media.sources) ? media.sources : [];
     if (sources.length === 0) {
-      console.log(`[WebstreamerLatino] Streamwish parse miss: ${url.href}`);
+      console.log(`[Flax] Streamwish parse miss: ${url.href}`);
       return [];
     }
     const bestSource = [...sources].filter((source) => source == null ? void 0 : source.url).sort((left, right) => {
@@ -2064,7 +2064,7 @@ function resolveStreamwish(result, url) {
       return rightBitrate - leftBitrate;
     })[0];
     if (!(bestSource == null ? void 0 : bestSource.url)) {
-      console.log(`[WebstreamerLatino] Streamwish parse miss: ${url.href}`);
+      console.log(`[Flax] Streamwish parse miss: ${url.href}`);
       return [];
     }
     const streamHeaders = buildPlaybackHeaders(embedUrl.href);
@@ -2088,7 +2088,7 @@ function resolveFileMoon(_0, _1) {
     const page = yield fetchPage(normalized.href, { headers }).catch(() => null);
     const html = (page == null ? void 0 : page.text) || null;
     if (!html || /Page not found/i.test(html)) {
-      console.log(`[WebstreamerLatino] FileMoon miss: ${url.href}`);
+      console.log(`[Flax] FileMoon miss: ${url.href}`);
       return [];
     }
     const iframeMatches = Array.from(html.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi));
@@ -2101,7 +2101,7 @@ function resolveFileMoon(_0, _1) {
     const unpacked = unpackPacker(html);
     const playlistMatch = unpacked.match(/sources\s*:\s*\[\s*\{\s*file\s*:\s*["']([^"']+\.m3u8[^"']*)/i) || unpacked.match(/file\s*:\s*["']([^"']+\.m3u8[^"']*)/i) || unpacked.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i);
     if (!playlistMatch) {
-      console.log(`[WebstreamerLatino] FileMoon parse miss: ${url.href}`);
+      console.log(`[Flax] FileMoon parse miss: ${url.href}`);
       return [];
     }
     const finalPageUrl = page.url || normalized.href;
@@ -2125,7 +2125,7 @@ function resolveVoe(result, url) {
     let page = yield fetchPage(url.href, { headers }).catch(() => null);
     let html = (page == null ? void 0 : page.text) || null;
     if (!html) {
-      console.log(`[WebstreamerLatino] VOE miss: ${url.href}`);
+      console.log(`[Flax] VOE miss: ${url.href}`);
       return [];
     }
     let config = extractVoeConfig(html);
@@ -2145,7 +2145,7 @@ function resolveVoe(result, url) {
     const directUrl = (config == null ? void 0 : config.direct_access_allowed) !== false ? config == null ? void 0 : config.direct_access_url : null;
     const streamUrl = playlistUrl || directUrl;
     if (!streamUrl) {
-      console.log(`[WebstreamerLatino] VOE parse miss: ${url.href}`);
+      console.log(`[Flax] VOE parse miss: ${url.href}`);
       return [];
     }
     return [buildStream(result, {
@@ -2167,7 +2167,7 @@ function resolveFilelions(result, url) {
     });
     const page = yield fetchPage(normalized.href, { headers }).catch(() => null);
     if (!(page == null ? void 0 : page.text)) {
-      console.log(`[WebstreamerLatino] FileLions miss: ${url.href}`);
+      console.log(`[Flax] FileLions miss: ${url.href}`);
       return [];
     }
     const unpacked = unpackPacker(page.text);
@@ -2177,7 +2177,7 @@ function resolveFilelions(result, url) {
     const fileMatch = unpacked.match(/file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/i) || unpacked.match(/sources\s*:\s*\[\{\s*file\s*:\s*["']([^"']+)/i);
     const playlistCandidate = (hls4Match == null ? void 0 : hls4Match[1]) || (hls3Match == null ? void 0 : hls3Match[1]) || (hls2Match == null ? void 0 : hls2Match[1]) || (fileMatch == null ? void 0 : fileMatch[1]);
     if (!playlistCandidate) {
-      console.log(`[WebstreamerLatino] FileLions parse miss: ${url.href}`);
+      console.log(`[Flax] FileLions parse miss: ${url.href}`);
       return [];
     }
     const finalPageUrl = page.url || normalized.href;
@@ -2201,12 +2201,12 @@ function resolveEmturbovid(result, url) {
     const page = yield fetchPage(url.href, { headers }).catch(() => null);
     const html = page == null ? void 0 : page.text;
     if (!html) {
-      console.log(`[WebstreamerLatino] Emturbovid miss: ${url.href}`);
+      console.log(`[Flax] Emturbovid miss: ${url.href}`);
       return [];
     }
     const playlistMatch = html.match(/data-hash="([^"]+\.m3u8[^"]*)"/i) || html.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i);
     if (!playlistMatch) {
-      console.log(`[WebstreamerLatino] Emturbovid parse miss: ${url.href}`);
+      console.log(`[Flax] Emturbovid parse miss: ${url.href}`);
       return [];
     }
     const playlistUrl = playlistMatch[1].replace(/\\\//g, "/");
@@ -2229,12 +2229,12 @@ function resolveCuevanaPlayer(result, url) {
       })
     }).catch(() => null);
     if (!html) {
-      console.log(`[WebstreamerLatino] Cuevana player miss: ${url.href}`);
+      console.log(`[Flax] Cuevana player miss: ${url.href}`);
       return [];
     }
     const targetMatch = html.match(/var\s+url\s*=\s*'([^']+)'/i) || html.match(/var\s+url\s*=\s*"([^"]+)"/i) || html.match(/<iframe[^>]+src="([^"]+)"/i) || html.match(/<iframe[^>]+src='([^']+)'/i);
     if (!targetMatch) {
-      console.log(`[WebstreamerLatino] Cuevana player parse miss: ${url.href}`);
+      console.log(`[Flax] Cuevana player parse miss: ${url.href}`);
       return [];
     }
     return resolveOne(__spreadProps(__spreadValues({}, result), {
@@ -2253,12 +2253,12 @@ function resolveCuevanaFakePlayer(result, url) {
       })
     }).catch(() => null);
     if (!html) {
-      console.log(`[WebstreamerLatino] Cuevana fakeplayer miss: ${url.href}`);
+      console.log(`[Flax] Cuevana fakeplayer miss: ${url.href}`);
       return [];
     }
     const targetMatch = html.match(/var\s+url\s*=\s*'([^']+)'/i) || html.match(/var\s+url\s*=\s*"([^"]+)"/i) || html.match(/window\.location\.href\s*=\s*['"]([^'"]+)['"]/i);
     if (!(targetMatch == null ? void 0 : targetMatch[1])) {
-      console.log(`[WebstreamerLatino] Cuevana fakeplayer parse miss: ${url.href}`);
+      console.log(`[Flax] Cuevana fakeplayer parse miss: ${url.href}`);
       return [];
     }
     return resolveOne(__spreadProps(__spreadValues({}, result), {
@@ -2272,7 +2272,7 @@ function resolveCuevanaFakePlayer(result, url) {
 function resolveStrp2p(result, url) {
   return __async(this, null, function* () {
     if (!url.hash || url.hash.length < 2) {
-      console.log(`[WebstreamerLatino] StrP2P miss: ${url.href}`);
+      console.log(`[Flax] StrP2P miss: ${url.href}`);
       return [];
     }
     const apiUrl = new URL(`/api/v1/video?id=${encodeURIComponent(url.hash.slice(1))}`, url.origin);
@@ -2283,7 +2283,7 @@ function resolveStrp2p(result, url) {
     };
     const hexData = yield fetchText(apiUrl.href, { headers }).catch(() => null);
     if (!hexData) {
-      console.log(`[WebstreamerLatino] StrP2P miss: ${url.href}`);
+      console.log(`[Flax] StrP2P miss: ${url.href}`);
       return [];
     }
     try {
@@ -2297,7 +2297,7 @@ function resolveStrp2p(result, url) {
       ).toString(import_crypto_js.default.enc.Utf8);
       const { source, title } = JSON.parse(decrypted);
       if (!source) {
-        console.log(`[WebstreamerLatino] StrP2P parse miss: ${url.href}`);
+        console.log(`[Flax] StrP2P parse miss: ${url.href}`);
         return [];
       }
       const playlistUrl = new URL(source, url.origin);
@@ -2312,7 +2312,7 @@ function resolveStrp2p(result, url) {
         })
       ];
     } catch (_error) {
-      console.log(`[WebstreamerLatino] StrP2P parse miss: ${url.href}`);
+      console.log(`[Flax] StrP2P parse miss: ${url.href}`);
       return [];
     }
   });
@@ -2330,14 +2330,14 @@ function resolveDoodStream(result, url) {
     });
     const html = yield fetchText(normalized.href, { headers }).catch(() => null);
     if (!html || /Video not found/i.test(html)) {
-      console.log(`[WebstreamerLatino] Dood miss: ${url.href}`);
+      console.log(`[Flax] Dood miss: ${url.href}`);
       return [];
     }
     const titlePage = import_cheerio_without_node_native2.default.load(html);
     const title = titlePage("title").text().trim().replace(/ - DoodStream$/i, "").trim() || result.title;
     const passMatch = html.match(/\$\.get\(\s*['"]([^'"]*\/pass_md5\/[^'"]+)['"]\s*,/i) || html.match(/(\/pass_md5\/[^'"\\\s]+)/);
     if (!passMatch) {
-      console.log(`[WebstreamerLatino] Dood pass_md5 miss: ${normalized.href}`);
+      console.log(`[Flax] Dood pass_md5 miss: ${normalized.href}`);
       return [];
     }
     const passUrl = new URL(passMatch[1], normalized.origin).href;
@@ -2351,7 +2351,7 @@ function resolveDoodStream(result, url) {
       }
     }).catch(() => null);
     if (!passResponse) {
-      console.log(`[WebstreamerLatino] Dood pass_md5 fetch miss: ${normalized.href}`);
+      console.log(`[Flax] Dood pass_md5 fetch miss: ${normalized.href}`);
       return [];
     }
     const directBase = passResponse.trim();
@@ -2364,7 +2364,7 @@ function resolveDoodStream(result, url) {
     const streamHeaders = { Referer: normalized.href };
     const isPlayable = !SHOULD_VALIDATE_MEDIA || (yield validateDirectMedia(directUrl.href, streamHeaders));
     if (!isPlayable) {
-      console.log(`[WebstreamerLatino] Dood blocked: ${normalized.href}`);
+      console.log(`[Flax] Dood blocked: ${normalized.href}`);
       return [];
     }
     return [buildStream(result, {
@@ -2398,12 +2398,12 @@ function resolveStreamtape(result, url) {
       break;
     }
     if (!html) {
-      console.log(`[WebstreamerLatino] Streamtape miss: ${url.href}`);
+      console.log(`[Flax] Streamtape miss: ${url.href}`);
       return [];
     }
     const directMatch = html.match(/'(\/\/streamtape\.com\/get_video[^']+)'/) || html.match(/"(\/\/streamtape\.com\/get_video[^"]+)"/);
     if (!directMatch) {
-      console.log(`[WebstreamerLatino] Streamtape miss: ${url.href}`);
+      console.log(`[Flax] Streamtape miss: ${url.href}`);
       return [];
     }
     const page = import_cheerio_without_node_native2.default.load(html);
@@ -2421,12 +2421,12 @@ function resolveStreamEmbed(result, url) {
   return __async(this, null, function* () {
     const html = yield fetchText(url.href, { headers: result.headers });
     if (/Video is not ready/i.test(html)) {
-      console.log(`[WebstreamerLatino] StreamEmbed not ready: ${url.href}`);
+      console.log(`[Flax] StreamEmbed not ready: ${url.href}`);
       return [];
     }
     const videoMatch = html.match(/video ?= ?(.*);/);
     if (!videoMatch) {
-      console.log(`[WebstreamerLatino] StreamEmbed parse miss: ${url.href}`);
+      console.log(`[Flax] StreamEmbed parse miss: ${url.href}`);
       return [];
     }
     const video = JSON.parse(videoMatch[1]);
@@ -2445,17 +2445,17 @@ function resolveGoodstream(result, url) {
     const pageUrl = url.href;
     const page = yield fetchPage(pageUrl, { headers: result.headers }).catch(() => null);
     if (!(page == null ? void 0 : page.text)) {
-      console.log(`[WebstreamerLatino] Goodstream miss: ${pageUrl}`);
+      console.log(`[Flax] Goodstream miss: ${pageUrl}`);
       return [];
     }
     const html = page.text;
     if (/expired|deleted|file is no longer available/i.test(html)) {
-      console.log(`[WebstreamerLatino] Goodstream dead link: ${pageUrl}`);
+      console.log(`[Flax] Goodstream dead link: ${pageUrl}`);
       return [];
     }
     const fileMatch = html.match(/sources:\s*\[\s*\{\s*file:"([^"]+\.m3u8[^"]*)"/i) || html.match(/sources:\s*\[\s*\{\s*file:'([^']+\.m3u8[^']*)'/i) || html.match(/file:"([^"]+\.m3u8[^"]*)"/i) || html.match(/file:'([^']+\.m3u8[^']*)'/i);
     if (!fileMatch) {
-      console.log(`[WebstreamerLatino] Goodstream parse miss: ${pageUrl}`);
+      console.log(`[Flax] Goodstream parse miss: ${pageUrl}`);
       return [];
     }
     const playlistUrl = fileMatch[1].replace(/\\\//g, "/");
@@ -2489,7 +2489,7 @@ function resolveVimeos(result, url) {
     });
     const html = yield fetchText(url.href, { headers }).catch(() => null);
     if (!html) {
-      console.log(`[WebstreamerLatino] Vimeos miss: ${url.href}`);
+      console.log(`[Flax] Vimeos miss: ${url.href}`);
       return [];
     }
     const unpacked = unpackPacker(html) || "";
@@ -2497,7 +2497,7 @@ function resolveVimeos(result, url) {
 ${unpacked}`;
     const fileMatch = body.match(/sources:\s*\[\{file:"([^"]+\.m3u8[^"]*)"/i) || body.match(/sources:\s*\[\{file:'([^']+\.m3u8[^']*)'/i) || body.match(/https?:\/\/[^"'`\s]+\.m3u8[^"'`\s]*/i);
     if (!fileMatch) {
-      console.log(`[WebstreamerLatino] Vimeos parse miss: ${url.href}`);
+      console.log(`[Flax] Vimeos parse miss: ${url.href}`);
       return [];
     }
     const playlistUrl = (fileMatch[1] || fileMatch[0]).replace(/\\\//g, "/");
@@ -2532,7 +2532,7 @@ function resolveVidSrc(result, url) {
     const expiresMatch = html.match(/['"]expires['"]: ?['"](.*?)['"]/);
     const urlMatch = html.match(/url: ?['"](.*?)['"]/);
     if (!tokenMatch || !expiresMatch || !urlMatch) {
-      console.log(`[WebstreamerLatino] VidSrc parse miss: ${url.href}`);
+      console.log(`[Flax] VidSrc parse miss: ${url.href}`);
       return [];
     }
     const baseUrl = new URL(urlMatch[1]);
@@ -2550,7 +2550,7 @@ function resolveVidSrc(result, url) {
   });
 }
 
-// src/webstreamer-latino/index.js
+// src/flax/index.js
 function getStreams(tmdbIdOrMedia, mediaType = "movie", season = null, episode = null) {
   return __async(this, null, function* () {
     let tmdbId, type, s, e;
@@ -2569,18 +2569,18 @@ function getStreams(tmdbIdOrMedia, mediaType = "movie", season = null, episode =
     const normalizedEpisode = e == null ? null : parseInt(e, 10);
     const normalizedMediaType = type === "series" ? "tv" : type;
     console.log(
-      `[WebstreamerLatino] Fetching streams for TMDB ID: ${tmdbId}, Type: ${normalizedMediaType}` + (normalizedSeason && normalizedEpisode ? `, S${normalizedSeason}E${normalizedEpisode}` : "")
+      `[Flax] Fetching streams for TMDB ID: ${tmdbId}, Type: ${normalizedMediaType}` + (normalizedSeason && normalizedEpisode ? `, S${normalizedSeason}E${normalizedEpisode}` : "")
     );
     try {
       const tmdb = yield getTmdbInfo(tmdbId, normalizedMediaType);
-      console.log(`[WebstreamerLatino] TMDB Info: "${tmdb.title}" (${tmdb.year || "N/A"})`);
+      console.log(`[Flax] TMDB Info: "${tmdb.title}" (${tmdb.year || "N/A"})`);
       const sourceResults = yield getLatinoSourceResults(tmdb, normalizedMediaType, normalizedSeason, normalizedEpisode);
-      console.log(`[WebstreamerLatino] Candidate source URLs: ${sourceResults.length}`);
+      console.log(`[Flax] Candidate source URLs: ${sourceResults.length}`);
       const streams = yield resolveLatinoStreams(sourceResults);
-      console.log(`[WebstreamerLatino] Final streams: ${streams.length}`);
+      console.log(`[Flax] Final streams: ${streams.length}`);
       return streams;
     } catch (error) {
-      console.error("[WebstreamerLatino] getStreams error:", error.message);
+      console.error("[Flax] getStreams error:", error.message);
       return [];
     }
   });

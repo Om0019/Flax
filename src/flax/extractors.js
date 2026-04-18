@@ -201,7 +201,7 @@ function buildStream(result, extracted) {
     url: extracted.url,
     quality,
     headers: extracted.headers || result.headers || {},
-    provider: 'webstreamer-latino',
+    provider: 'flax',
     source: result.source,
     language: result.language,
     player,
@@ -221,7 +221,7 @@ function buildDeferredStream(result) {
     url: result.url,
     quality: 'Auto',
     headers: result.headers || {},
-    provider: 'webstreamer-latino',
+    provider: 'flax',
     source: result.source,
     language: result.language,
     player,
@@ -242,7 +242,7 @@ export async function resolveLatinoStreams(results) {
 
   candidates.forEach((result) => {
     const player = inferPlayerFromUrl(result.url);
-    console.log(`[WebstreamerLatino] Candidate: ${result.source} -> ${result.url} -> ${player || 'unknown'}`);
+    console.log(`[Flax] Candidate: ${result.source} -> ${result.url} -> ${player || 'unknown'}`);
   });
 
   const deferredStreams = candidates
@@ -254,7 +254,7 @@ export async function resolveLatinoStreams(results) {
 
   if (candidates.length > immediateCandidates.length + deferredStreams.length) {
     console.log(
-      `[WebstreamerLatino] Candidate cap: resolving ${immediateCandidates.length}/${candidates.length - deferredStreams.length} immediate candidates`
+      `[Flax] Candidate cap: resolving ${immediateCandidates.length}/${candidates.length - deferredStreams.length} immediate candidates`
     );
   }
 
@@ -345,7 +345,7 @@ async function resolveWithTimeout(result) {
       resolveOne(result),
       new Promise(resolve => {
         timeoutId = setTimeout(() => {
-          console.warn(`[WebstreamerLatino] Extractor timed out after ${EXTRACTOR_TIMEOUT_MS}ms: ${result.url}`);
+          console.warn(`[Flax] Extractor timed out after ${EXTRACTOR_TIMEOUT_MS}ms: ${result.url}`);
           resolve([]);
         }, EXTRACTOR_TIMEOUT_MS);
       }),
@@ -383,22 +383,22 @@ async function resolveOne(result) {
     }
 
     if (/supervideo/i.test(host)) {
-      console.log(`[WebstreamerLatino] SuperVideo skipped: ${result.url}`);
+      console.log(`[Flax] SuperVideo skipped: ${result.url}`);
       return [];
     }
 
     if (/dropload|dr0pstream/i.test(host)) {
-      console.log(`[WebstreamerLatino] Dropload skipped: ${result.url}`);
+      console.log(`[Flax] Dropload skipped: ${result.url}`);
       return [];
     }
 
     if (/vudeo/i.test(host)) {
-      console.log(`[WebstreamerLatino] Vudeo skipped: ${result.url}`);
+      console.log(`[Flax] Vudeo skipped: ${result.url}`);
       return [];
     }
 
     if (/plustream/i.test(result.player || '')) {
-      console.log(`[WebstreamerLatino] Plustream skipped: ${result.url}`);
+      console.log(`[Flax] Plustream skipped: ${result.url}`);
       return [];
     }
 
@@ -443,7 +443,7 @@ async function resolveOne(result) {
     }
 
     if (/fastream/i.test(host)) {
-      console.log(`[WebstreamerLatino] Fastream skipped: ${result.url}`);
+      console.log(`[Flax] Fastream skipped: ${result.url}`);
       return [];
     }
 
@@ -452,7 +452,7 @@ async function resolveOne(result) {
     }
 
     if (/waaw|vidora/i.test(host)) {
-      console.log(`[WebstreamerLatino] Vidora skipped: ${result.url}`);
+      console.log(`[Flax] Vidora skipped: ${result.url}`);
       return [];
     }
 
@@ -472,7 +472,7 @@ async function resolveOne(result) {
       return resolveVidSrc(result, url);
     }
 
-    console.log(`[WebstreamerLatino] Unsupported host: ${result.url}`);
+    console.log(`[Flax] Unsupported host: ${result.url}`);
     return [];
   } catch (_error) {
     return [];
@@ -561,7 +561,7 @@ async function validatePlayableStreams(streams) {
 
     const ok = await probePlaybackUrl(stream.url, stream.headers);
     if (!ok) {
-      console.log(`[WebstreamerLatino] playback probe failed: ${stream.player} -> ${stream.url}`);
+      console.log(`[Flax] playback probe failed: ${stream.player} -> ${stream.url}`);
       return null;
     }
 
@@ -661,7 +661,7 @@ async function resolveMixdrop(result, url) {
   );
 
   if (!html || /can't find the (file|video)/i.test(html)) {
-    console.log(`[WebstreamerLatino] Mixdrop miss: ${url.href}`);
+    console.log(`[Flax] Mixdrop miss: ${url.href}`);
     return [];
   }
 
@@ -705,7 +705,7 @@ async function resolveMixdrop(result, url) {
   }
 
   if (!directValue || /^\/e\//.test(directValue)) {
-    console.log(`[WebstreamerLatino] Mixdrop parse miss: ${url.href}`);
+    console.log(`[Flax] Mixdrop parse miss: ${url.href}`);
     return [];
   }
 
@@ -721,7 +721,7 @@ async function resolveMixdrop(result, url) {
 
   const isPlayable = !SHOULD_VALIDATE_MEDIA || await validateDirectMedia(directUrl, streamHeaders);
   if (!isPlayable) {
-    console.log(`[WebstreamerLatino] Mixdrop blocked: ${url.href}`);
+    console.log(`[Flax] Mixdrop blocked: ${url.href}`);
     return [];
   }
 
@@ -738,7 +738,7 @@ async function resolveStreamwish(result, url) {
   const embedUrl = new URL(url.href.replace('/f/', '/e/'));
   const code = extractEmbedCode(embedUrl);
   if (!code) {
-    console.log(`[WebstreamerLatino] Streamwish miss: ${url.href}`);
+    console.log(`[Flax] Streamwish miss: ${url.href}`);
     return [];
   }
 
@@ -756,7 +756,7 @@ async function resolveStreamwish(result, url) {
   const sources = Array.isArray(media?.sources) ? media.sources : [];
 
   if (sources.length === 0) {
-    console.log(`[WebstreamerLatino] Streamwish parse miss: ${url.href}`);
+    console.log(`[Flax] Streamwish parse miss: ${url.href}`);
     return [];
   }
 
@@ -776,7 +776,7 @@ async function resolveStreamwish(result, url) {
     })[0];
 
   if (!bestSource?.url) {
-    console.log(`[WebstreamerLatino] Streamwish parse miss: ${url.href}`);
+    console.log(`[Flax] Streamwish parse miss: ${url.href}`);
     return [];
   }
 
@@ -804,7 +804,7 @@ async function resolveFileMoon(result, url, originalUrl = url) {
   const html = page?.text || null;
 
   if (!html || /Page not found/i.test(html)) {
-    console.log(`[WebstreamerLatino] FileMoon miss: ${url.href}`);
+    console.log(`[Flax] FileMoon miss: ${url.href}`);
     return [];
   }
 
@@ -823,7 +823,7 @@ async function resolveFileMoon(result, url, originalUrl = url) {
     unpacked.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i);
 
   if (!playlistMatch) {
-    console.log(`[WebstreamerLatino] FileMoon parse miss: ${url.href}`);
+    console.log(`[Flax] FileMoon parse miss: ${url.href}`);
     return [];
   }
 
@@ -850,7 +850,7 @@ async function resolveVoe(result, url) {
   let html = page?.text || null;
 
   if (!html) {
-    console.log(`[WebstreamerLatino] VOE miss: ${url.href}`);
+    console.log(`[Flax] VOE miss: ${url.href}`);
     return [];
   }
 
@@ -873,7 +873,7 @@ async function resolveVoe(result, url) {
   const streamUrl = playlistUrl || directUrl;
 
   if (!streamUrl) {
-    console.log(`[WebstreamerLatino] VOE parse miss: ${url.href}`);
+    console.log(`[Flax] VOE parse miss: ${url.href}`);
     return [];
   }
 
@@ -899,7 +899,7 @@ async function resolveFilelions(result, url) {
   };
   const page = await fetchPage(normalized.href, { headers }).catch(() => null);
   if (!page?.text) {
-    console.log(`[WebstreamerLatino] FileLions miss: ${url.href}`);
+    console.log(`[Flax] FileLions miss: ${url.href}`);
     return [];
   }
 
@@ -915,7 +915,7 @@ async function resolveFilelions(result, url) {
   const playlistCandidate = hls4Match?.[1] || hls3Match?.[1] || hls2Match?.[1] || fileMatch?.[1];
 
   if (!playlistCandidate) {
-    console.log(`[WebstreamerLatino] FileLions parse miss: ${url.href}`);
+    console.log(`[Flax] FileLions parse miss: ${url.href}`);
     return [];
   }
 
@@ -941,7 +941,7 @@ async function resolveEmturbovid(result, url) {
   const page = await fetchPage(url.href, { headers }).catch(() => null);
   const html = page?.text;
   if (!html) {
-    console.log(`[WebstreamerLatino] Emturbovid miss: ${url.href}`);
+    console.log(`[Flax] Emturbovid miss: ${url.href}`);
     return [];
   }
 
@@ -950,7 +950,7 @@ async function resolveEmturbovid(result, url) {
     html.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i);
 
   if (!playlistMatch) {
-    console.log(`[WebstreamerLatino] Emturbovid parse miss: ${url.href}`);
+    console.log(`[Flax] Emturbovid parse miss: ${url.href}`);
     return [];
   }
 
@@ -976,7 +976,7 @@ async function resolveCuevanaPlayer(result, url) {
   }).catch(() => null);
 
   if (!html) {
-    console.log(`[WebstreamerLatino] Cuevana player miss: ${url.href}`);
+    console.log(`[Flax] Cuevana player miss: ${url.href}`);
     return [];
   }
 
@@ -987,7 +987,7 @@ async function resolveCuevanaPlayer(result, url) {
     html.match(/<iframe[^>]+src='([^']+)'/i);
 
   if (!targetMatch) {
-    console.log(`[WebstreamerLatino] Cuevana player parse miss: ${url.href}`);
+    console.log(`[Flax] Cuevana player parse miss: ${url.href}`);
     return [];
   }
 
@@ -1009,7 +1009,7 @@ async function resolveCuevanaFakePlayer(result, url) {
   }).catch(() => null);
 
   if (!html) {
-    console.log(`[WebstreamerLatino] Cuevana fakeplayer miss: ${url.href}`);
+    console.log(`[Flax] Cuevana fakeplayer miss: ${url.href}`);
     return [];
   }
 
@@ -1019,7 +1019,7 @@ async function resolveCuevanaFakePlayer(result, url) {
     html.match(/window\.location\.href\s*=\s*['"]([^'"]+)['"]/i);
 
   if (!targetMatch?.[1]) {
-    console.log(`[WebstreamerLatino] Cuevana fakeplayer parse miss: ${url.href}`);
+    console.log(`[Flax] Cuevana fakeplayer parse miss: ${url.href}`);
     return [];
   }
 
@@ -1034,7 +1034,7 @@ async function resolveCuevanaFakePlayer(result, url) {
 
 async function resolveStrp2p(result, url) {
   if (!url.hash || url.hash.length < 2) {
-    console.log(`[WebstreamerLatino] StrP2P miss: ${url.href}`);
+    console.log(`[Flax] StrP2P miss: ${url.href}`);
     return [];
   }
 
@@ -1047,7 +1047,7 @@ async function resolveStrp2p(result, url) {
 
   const hexData = await fetchText(apiUrl.href, { headers }).catch(() => null);
   if (!hexData) {
-    console.log(`[WebstreamerLatino] StrP2P miss: ${url.href}`);
+    console.log(`[Flax] StrP2P miss: ${url.href}`);
     return [];
   }
 
@@ -1063,7 +1063,7 @@ async function resolveStrp2p(result, url) {
     const { source, title } = JSON.parse(decrypted);
 
     if (!source) {
-      console.log(`[WebstreamerLatino] StrP2P parse miss: ${url.href}`);
+      console.log(`[Flax] StrP2P parse miss: ${url.href}`);
       return [];
     }
 
@@ -1080,7 +1080,7 @@ async function resolveStrp2p(result, url) {
       }),
     ];
   } catch (_error) {
-    console.log(`[WebstreamerLatino] StrP2P parse miss: ${url.href}`);
+    console.log(`[Flax] StrP2P parse miss: ${url.href}`);
     return [];
   }
 }
@@ -1100,7 +1100,7 @@ async function resolveDoodStream(result, url) {
   const html = await fetchText(normalized.href, { headers }).catch(() => null);
 
   if (!html || /Video not found/i.test(html)) {
-    console.log(`[WebstreamerLatino] Dood miss: ${url.href}`);
+    console.log(`[Flax] Dood miss: ${url.href}`);
     return [];
   }
 
@@ -1111,7 +1111,7 @@ async function resolveDoodStream(result, url) {
     html.match(/\$\.get\(\s*['"]([^'"]*\/pass_md5\/[^'"]+)['"]\s*,/i) ||
     html.match(/(\/pass_md5\/[^'"\\\s]+)/);
   if (!passMatch) {
-    console.log(`[WebstreamerLatino] Dood pass_md5 miss: ${normalized.href}`);
+    console.log(`[Flax] Dood pass_md5 miss: ${normalized.href}`);
     return [];
   }
 
@@ -1127,7 +1127,7 @@ async function resolveDoodStream(result, url) {
   }).catch(() => null);
 
   if (!passResponse) {
-    console.log(`[WebstreamerLatino] Dood pass_md5 fetch miss: ${normalized.href}`);
+    console.log(`[Flax] Dood pass_md5 fetch miss: ${normalized.href}`);
     return [];
   }
 
@@ -1141,7 +1141,7 @@ async function resolveDoodStream(result, url) {
   const streamHeaders = { Referer: normalized.href };
   const isPlayable = !SHOULD_VALIDATE_MEDIA || await validateDirectMedia(directUrl.href, streamHeaders);
   if (!isPlayable) {
-    console.log(`[WebstreamerLatino] Dood blocked: ${normalized.href}`);
+    console.log(`[Flax] Dood blocked: ${normalized.href}`);
     return [];
   }
 
@@ -1162,12 +1162,12 @@ async function resolveDropload(result, url) {
   const html = await fetchText(normalized, { headers: result.headers }).catch(() => null);
 
   if (!html) {
-    console.log(`[WebstreamerLatino] Dropload miss: ${url.href}`);
+    console.log(`[Flax] Dropload miss: ${url.href}`);
     return [];
   }
 
   if (/File Not Found|Pending in queue|no longer available|expired or has been deleted/i.test(html)) {
-    console.log(`[WebstreamerLatino] Dropload miss: ${url.href}`);
+    console.log(`[Flax] Dropload miss: ${url.href}`);
     return [];
   }
 
@@ -1178,7 +1178,7 @@ async function resolveDropload(result, url) {
     unpacked.match(/file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/i) ||
     html.match(/file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/i);
   if (!fileMatch) {
-    console.log(`[WebstreamerLatino] Dropload parse miss: ${url.href}`);
+    console.log(`[Flax] Dropload parse miss: ${url.href}`);
     return [];
   }
 
@@ -1221,14 +1221,14 @@ async function resolveStreamtape(result, url) {
   }
 
   if (!html) {
-    console.log(`[WebstreamerLatino] Streamtape miss: ${url.href}`);
+    console.log(`[Flax] Streamtape miss: ${url.href}`);
     return [];
   }
 
   const directMatch = html.match(/'(\/\/streamtape\.com\/get_video[^']+)'/) || html.match(/"(\/\/streamtape\.com\/get_video[^"]+)"/);
 
   if (!directMatch) {
-    console.log(`[WebstreamerLatino] Streamtape miss: ${url.href}`);
+    console.log(`[Flax] Streamtape miss: ${url.href}`);
     return [];
   }
 
@@ -1276,7 +1276,7 @@ async function resolveFastream(result, url) {
     })];
   }
 
-  console.log(`[WebstreamerLatino] Fastream miss: ${url.href}`);
+  console.log(`[Flax] Fastream miss: ${url.href}`);
   return [];
 }
 
@@ -1301,7 +1301,7 @@ async function resolveVidora(result, url) {
   }
 
   if (!html || !finalUrl) {
-    console.log(`[WebstreamerLatino] Vidora miss: ${url.href}`);
+    console.log(`[Flax] Vidora miss: ${url.href}`);
     return [];
   }
 
@@ -1311,7 +1311,7 @@ async function resolveVidora(result, url) {
     unpacked.match(/file:\s*'(.*?)'/) ||
     html.match(/src:\s*['"](https?:\/\/[^'"]+\.m3u8[^'"]*)/i);
   if (!fileMatch) {
-    console.log(`[WebstreamerLatino] Vidora miss: ${url.href}`);
+    console.log(`[Flax] Vidora miss: ${url.href}`);
     return [];
   }
 
@@ -1332,13 +1332,13 @@ async function resolveVidora(result, url) {
 async function resolveStreamEmbed(result, url) {
   const html = await fetchText(url.href, { headers: result.headers });
   if (/Video is not ready/i.test(html)) {
-    console.log(`[WebstreamerLatino] StreamEmbed not ready: ${url.href}`);
+    console.log(`[Flax] StreamEmbed not ready: ${url.href}`);
     return [];
   }
 
   const videoMatch = html.match(/video ?= ?(.*);/);
   if (!videoMatch) {
-    console.log(`[WebstreamerLatino] StreamEmbed parse miss: ${url.href}`);
+    console.log(`[Flax] StreamEmbed parse miss: ${url.href}`);
     return [];
   }
 
@@ -1358,14 +1358,14 @@ async function resolveGoodstream(result, url) {
   const pageUrl = url.href;
   const page = await fetchPage(pageUrl, { headers: result.headers }).catch(() => null);
   if (!page?.text) {
-    console.log(`[WebstreamerLatino] Goodstream miss: ${pageUrl}`);
+    console.log(`[Flax] Goodstream miss: ${pageUrl}`);
     return [];
   }
 
   const html = page.text;
 
   if (/expired|deleted|file is no longer available/i.test(html)) {
-    console.log(`[WebstreamerLatino] Goodstream dead link: ${pageUrl}`);
+    console.log(`[Flax] Goodstream dead link: ${pageUrl}`);
     return [];
   }
 
@@ -1376,7 +1376,7 @@ async function resolveGoodstream(result, url) {
     html.match(/file:'([^']+\.m3u8[^']*)'/i);
 
   if (!fileMatch) {
-    console.log(`[WebstreamerLatino] Goodstream parse miss: ${pageUrl}`);
+    console.log(`[Flax] Goodstream parse miss: ${pageUrl}`);
     return [];
   }
 
@@ -1413,7 +1413,7 @@ async function resolveVimeos(result, url) {
   };
   const html = await fetchText(url.href, { headers }).catch(() => null);
   if (!html) {
-    console.log(`[WebstreamerLatino] Vimeos miss: ${url.href}`);
+    console.log(`[Flax] Vimeos miss: ${url.href}`);
     return [];
   }
 
@@ -1425,7 +1425,7 @@ async function resolveVimeos(result, url) {
     body.match(/https?:\/\/[^"'`\s]+\.m3u8[^"'`\s]*/i);
 
   if (!fileMatch) {
-    console.log(`[WebstreamerLatino] Vimeos parse miss: ${url.href}`);
+    console.log(`[Flax] Vimeos parse miss: ${url.href}`);
     return [];
   }
 
@@ -1462,7 +1462,7 @@ async function resolveVidSrc(result, url) {
   const urlMatch = html.match(/url: ?['"](.*?)['"]/);
 
   if (!tokenMatch || !expiresMatch || !urlMatch) {
-    console.log(`[WebstreamerLatino] VidSrc parse miss: ${url.href}`);
+    console.log(`[Flax] VidSrc parse miss: ${url.href}`);
     return [];
   }
 

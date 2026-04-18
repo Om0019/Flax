@@ -220,7 +220,7 @@ export async function getLatinoSourceResults(tmdb, mediaType, season, episode) {
         return result.value.filter((entry) => !isBlockedLatinoResult(entry));
       }
 
-      console.error('[WebstreamerLatino] Source error:', result.reason ? result.reason.message : result.reason);
+      console.error('[Flax] Source error:', result.reason ? result.reason.message : result.reason);
       return [];
     })
   );
@@ -244,7 +244,7 @@ export async function getLatinoSourceResults(tmdb, mediaType, season, episode) {
         promise,
         new Promise(resolve => {
           timeoutId = setTimeout(() => {
-            console.warn(`[WebstreamerLatino] Source timed out after ${sourceTimeoutMs}ms: ${label}`);
+            console.warn(`[Flax] Source timed out after ${sourceTimeoutMs}ms: ${label}`);
             resolve([]);
           }, sourceTimeoutMs);
         }),
@@ -280,7 +280,7 @@ export async function getLatinoSourceResults(tmdb, mediaType, season, episode) {
 
     const cuevanaResults = await withTimeout('cuevana', searchCuevana(searchTmdb, season, episode))
       .catch((error) => {
-        console.error('[WebstreamerLatino] Source error:', error ? error.message : error);
+        console.error('[Flax] Source error:', error ? error.message : error);
         return [];
       });
 
@@ -300,7 +300,7 @@ export async function getLatinoSourceResults(tmdb, mediaType, season, episode) {
     return primaryResults;
   }
 
-  console.log(`[WebstreamerLatino] No streams found with primary titles, retrying with original title order: ${fallbackCandidates.join(' | ')}`);
+  console.log(`[Flax] No streams found with primary titles, retrying with original title order: ${fallbackCandidates.join(' | ')}`);
   return runSourceSearch(fallbackTmdb);
 }
 
