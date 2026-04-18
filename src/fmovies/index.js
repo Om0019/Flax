@@ -181,6 +181,10 @@ function sortStreams(streams) {
   return [...streams].sort((left, right) => rank(right.quality) - rank(left.quality));
 }
 
+function flattenResults(results) {
+  return results.reduce((all, item) => all.concat(item || []), []);
+}
+
 async function getStreams(tmdbIdOrMedia, mediaType = 'movie', season = null, episode = null) {
   try {
     let tmdbId;
@@ -208,7 +212,7 @@ async function getStreams(tmdbIdOrMedia, mediaType = 'movie', season = null, epi
     const results = await Promise.all(
       SERVERS.map((server) => fetchFromServer(server, media, normalizedSeason, normalizedEpisode)),
     );
-    return sortStreams(dedupeStreams(results.flat()));
+    return sortStreams(dedupeStreams(flattenResults(results)));
   } catch (_error) {
     return [];
   }

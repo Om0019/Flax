@@ -490,6 +490,10 @@ function dedupeStreams(streams) {
   });
 }
 
+function flattenResults(results) {
+  return results.reduce((all, item) => all.concat(item || []), []);
+}
+
 async function getStreams(tmdbIdOrMedia, mediaType = 'movie', season = null, episode = null) {
   try {
     let tmdbId;
@@ -517,7 +521,7 @@ async function getStreams(tmdbIdOrMedia, mediaType = 'movie', season = null, epi
     const results = await Promise.all(
       EMBED_SERVERS.map((server) => fetchFromServer(server, media, normalizedSeason, normalizedEpisode)),
     );
-    return dedupeStreams(results.flat());
+    return dedupeStreams(flattenResults(results));
   } catch (_error) {
     return [];
   }

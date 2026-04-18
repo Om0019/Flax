@@ -1,6 +1,6 @@
 /**
  * xprime - Built from src/xprime/
- * Generated: 2026-04-18T19:28:54.978Z
+ * Generated: 2026-04-18T19:33:57.984Z
  */
 var __async = (__this, __arguments, generator) => {
   return new Promise((resolve, reject) => {
@@ -453,6 +453,9 @@ function dedupeStreams(streams) {
     return true;
   });
 }
+function flattenResults(results) {
+  return results.reduce((all, item) => all.concat(item || []), []);
+}
 function getStreams(tmdbIdOrMedia, mediaType = "movie", season = null, episode = null) {
   return __async(this, null, function* () {
     try {
@@ -478,7 +481,7 @@ function getStreams(tmdbIdOrMedia, mediaType = "movie", season = null, episode =
       const results = yield Promise.all(
         EMBED_SERVERS.map((server) => fetchFromServer(server, media, normalizedSeason, normalizedEpisode))
       );
-      return dedupeStreams(results.flat());
+      return dedupeStreams(flattenResults(results));
     } catch (_error) {
       return [];
     }

@@ -1,6 +1,6 @@
 /**
  * fmovies - Built from src/fmovies/
- * Generated: 2026-04-18T19:28:54.977Z
+ * Generated: 2026-04-18T19:33:57.982Z
  */
 var __defProp = Object.defineProperty;
 var __defProps = Object.defineProperties;
@@ -193,6 +193,9 @@ function sortStreams(streams) {
   };
   return [...streams].sort((left, right) => rank(right.quality) - rank(left.quality));
 }
+function flattenResults(results) {
+  return results.reduce((all, item) => all.concat(item || []), []);
+}
 function getStreams(tmdbIdOrMedia, mediaType = "movie", season = null, episode = null) {
   return __async(this, null, function* () {
     try {
@@ -218,7 +221,7 @@ function getStreams(tmdbIdOrMedia, mediaType = "movie", season = null, episode =
       const results = yield Promise.all(
         SERVERS.map((server) => fetchFromServer(server, media, normalizedSeason, normalizedEpisode))
       );
-      return sortStreams(dedupeStreams(results.flat()));
+      return sortStreams(dedupeStreams(flattenResults(results)));
     } catch (_error) {
       return [];
     }
