@@ -1,0 +1,1516 @@
+import cheerio from 'cheerio-without-node-native';
+import CryptoJS from 'crypto-js';
+import { DEFAULT_EXTRACTOR_CANDIDATE_LIMIT, DEFAULT_EXTRACTOR_TIMEOUT_MS } from './constants.js';
+import { fetchJson, fetchPage, fetchText } from './http.js';
+import { getEnvValue } from './env.js';
+import { extractPackedUrl, guessHeightFromPlaylist, parseQuality, qualityRank, uniqueBy, unpackPacker } from './utils.js';
+
+const SHOULD_VALIDATE_MEDIA = false;
+const EXTRACTOR_TIMEOUT_MS = Math.max(
+  1000,
+  parseInt(getEnvValue('WEBSTREAMER_LATINO_EXTRACTOR_TIMEOUT_MS', String(DEFAULT_EXTRACTOR_TIMEOUT_MS)), 10) || DEFAULT_EXTRACTOR_TIMEOUT_MS
+);
+const EXTRACTOR_CANDIDATE_LIMIT = Math.max(
+  1,
+  parseInt(getEnvValue('WEBSTREAMER_LATINO_EXTRACTOR_CANDIDATE_LIMIT', String(DEFAULT_EXTRACTOR_CANDIDATE_LIMIT)), 10) || DEFAULT_EXTRACTOR_CANDIDATE_LIMIT
+);
+
+const DEFAULT_EXTRACTOR_TIMEOUTS_MS = {
+  emturbovid: 1800,
+  voe: 1800,
+  filemoon: 1800,
+  streamwish: 2000,
+  streamtape: 1400,
+  doodstream: 1400,
+  goodstream: 3200,
+  vimeos: 2800,
+  filelions: 2600,
+  strp2p: 1800,
+  vidsrc: 1800,
+  streamembed: 1800,
+  fastream: 1200,
+};
+
+function getExtractorTimeoutMs(label, fallback = EXTRACTOR_TIMEOUT_MS) {
+  const envKey = `WEBSTREAMER_LATINO_EXTRACTOR_TIMEOUT_${String(label || '').replace(/[^A-Z0-9]/gi, '_').toUpperCase()}`;
+  const defaultTimeout = DEFAULT_EXTRACTOR_TIMEOUTS_MS[label] || fallback;
+  return Math.max(
+    1000,
+    parseInt(getEnvValue(envKey, String(defaultTimeout)), 10) || defaultTimeout
+  );
+}
+
+function absoluteUrl(rawUrl, origin) {
+  return new URL(rawUrl.replace(/^\/\//, 'https://'), origin).href;
+}
+
+function buildPlaybackHeaders(pageUrl, extra = {}) {
+  const finalPageUrl = String(pageUrl || '');
+  let origin = '';
+
+  try {
+    origin = new URL(finalPageUrl).origin;
+  } catch (_error) {}
+
+  return {
+    ...(origin ? { Origin: origin } : {}),
+    ...(finalPageUrl ? { Referer: finalPageUrl } : {}),
+    ...extra,
+  };
+}
+
+function extractInlineCookieHeader(html) {
+  const cookiePairs = [];
+  const pattern = /\$\.cookie\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]*)['"]/g;
+  let match;
+
+  while ((match = pattern.exec(String(html || '')))) {
+    cookiePairs.push(`${match[1]}=${match[2]}`);
+  }
+
+  return cookiePairs.join('; ');
+}
+
+function decodeBase64UrlToBytes(value) {
+  const input = String(value || '').replace(/-/g, '+').replace(/_/g, '/');
+  const normalized = input.padEnd(input.length + ((4 - input.length % 4) % 4), '=');
+
+  if (typeof Buffer !== 'undefined') {
+    return Uint8Array.from(Buffer.from(normalized, 'base64'));
+  }
+
+  const binary = globalThis.atob(normalized);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+function decodeBase64ToText(value) {
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(String(value || ''), 'base64').toString('utf8');
+  }
+
+  return globalThis.atob(String(value || ''));
+}
+
+function cleanExtractedTitle(value, fallback = '') {
+  const raw = String(value || '').trim();
+  const safeFallback = String(fallback || '').trim();
+
+  if (!raw) {
+    return safeFallback;
+  }
+
+  const basename = raw.replace(/\.(m3u8|mp4|mkv|avi)(\?.*)?$/i, '');
+  const encodedPrefix = basename.split('.')[0];
+
+  if (/^[A-Za-z0-9+/=_-]{16,}$/.test(encodedPrefix) && basename.includes('.')) {
+    try {
+      const decoded = decodeBase64ToText(encodedPrefix.replace(/-/g, '+').replace(/_/g, '/'));
+      if (/[A-Za-z]{3,}/.test(decoded)) {
+        return safeFallback || decoded.trim();
+      }
+    } catch (_error) {
+      return safeFallback || raw;
+    }
+  }
+
+  return basename || safeFallback;
+}
+
+function shouldKeepFallbackTitle(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return true;
+  }
+
+  return /--datq--/i.test(text) || /^\d{4,}--/.test(text);
+}
+
+function extractEmbedCode(url) {
+  const parts = url.pathname.replace(/\/+$/, '').split('/').filter(Boolean);
+  const markerIndex = parts.findIndex((part) => part === 'e' || part === 'embed');
+
+  if (markerIndex >= 0 && parts[markerIndex + 1]) {
+    return parts[markerIndex + 1];
+  }
+
+  return parts.length ? parts[parts.length - 1] : '';
+}
+
+async function decryptStreamwishPayload(payload) {
+  if (!payload?.iv || !payload?.payload || !Array.isArray(payload.key_parts) || payload.key_parts.length === 0) {
+    return null;
+  }
+
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) {
+    return null;
+  }
+
+  const keyParts = payload.key_parts.map((part) => decodeBase64UrlToBytes(part));
+  const key = new Uint8Array(keyParts.reduce((size, part) => size + part.length, 0));
+  let offset = 0;
+
+  keyParts.forEach((part) => {
+    key.set(part, offset);
+    offset += part.length;
+  });
+
+  const iv = decodeBase64UrlToBytes(payload.iv);
+  const encrypted = decodeBase64UrlToBytes(payload.payload);
+  const importedKey = await subtle.importKey(
+    'raw',
+    key,
+    { name: 'AES-GCM' },
+    false,
+    ['decrypt']
+  );
+  const decrypted = await subtle.decrypt({ name: 'AES-GCM', iv }, importedKey, encrypted);
+
+  return JSON.parse(new TextDecoder().decode(new Uint8Array(decrypted)));
+}
+
+function rotate13(value) {
+  return String(value || '').replace(/[A-Za-z]/g, (char) => {
+    const base = char <= 'Z' ? 65 : 97;
+    return String.fromCharCode(((char.charCodeAt(0) - base + 13) % 26) + base);
+  });
+}
+
+function decodeVoeConfigToken(token) {
+  const normalized = rotate13(token)
+    .replace(/(@\$|\^\^|~@|%\?|\*~|!!|#&)/g, '_')
+    .replace(/_/g, '');
+  const decoded = decodeBase64ToText(normalized);
+  const shifted = Array.from(decoded, (char) => String.fromCharCode(char.charCodeAt(0) - 3)).join('');
+  const reversed = shifted.split('').reverse().join('');
+
+  return JSON.parse(decodeBase64ToText(reversed));
+}
+
+function extractVoeConfig(html) {
+  const matches = html.matchAll(/<script[^>]+type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/gi);
+
+  for (const match of matches) {
+    try {
+      const payload = JSON.parse(match[1]);
+      if (Array.isArray(payload) && typeof payload[0] === 'string') {
+        return decodeVoeConfigToken(payload[0]);
+      }
+    } catch (_error) {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+function extractVoeRedirect(html) {
+  const match =
+    html.match(/window\.location\.href\s*=\s*['"]([^'"]+)['"]/i) ||
+    html.match(/window\.location\.replace\(\s*['"]([^'"]+)['"]\s*\)/i) ||
+    html.match(/location\.href\s*=\s*['"]([^'"]+)['"]/i) ||
+    html.match(/location\.replace\(\s*['"]([^'"]+)['"]\s*\)/i);
+
+  return match?.[1] || null;
+}
+
+function buildStream(result, extracted) {
+  const quality = extracted.quality || parseQuality(extracted.title || extracted.url);
+  const player = extracted.player || result.player || inferPlayerFromUrl(extracted.url || result.url);
+  const title = result.preserveTitle || shouldKeepFallbackTitle(extracted.title)
+    ? String(result.title || `${result.language} Stream`).trim()
+    : cleanExtractedTitle(extracted.title, result.title || `${result.language} Stream`);
+  return {
+    name: `${result.source} ${result.language}${player ? ` (${player})` : ''}`,
+    title: `${title}${player ? ` [${player}]` : ''}`,
+    url: extracted.url,
+    quality,
+    headers: extracted.headers || result.headers || {},
+    provider: 'flax',
+    source: result.source,
+    language: result.language,
+    player,
+    extractorTarget: result.url,
+    extractorHeaders: result.headers || {},
+    qualityRank: qualityRank(quality),
+  };
+}
+
+const DEFERRED_RESOLUTION_PLAYERS = new Set();
+
+function buildDeferredStream(result) {
+  const player = result.player || inferPlayerFromUrl(result.url);
+  return {
+    name: `${result.source} ${result.language}${player ? ` (${player})` : ''}`,
+    title: `${result.title || `${result.language} Stream`}${player ? ` [${player}]` : ''}`,
+    url: result.url,
+    quality: 'Auto',
+    headers: result.headers || {},
+    provider: 'flax',
+    source: result.source,
+    language: result.language,
+    player,
+    extractorTarget: result.url,
+    extractorHeaders: result.headers || {},
+    qualityRank: playerRank(player),
+    deferredResolution: true,
+  };
+}
+
+function shouldDeferResolution(result) {
+  const player = result.player || inferPlayerFromUrl(result.url);
+  return DEFERRED_RESOLUTION_PLAYERS.has(player);
+}
+
+export async function resolveLatinoStreams(results) {
+  const candidates = prioritizeExtractorCandidates(results);
+
+  candidates.forEach((result) => {
+    const player = inferPlayerFromUrl(result.url);
+    console.log(`[Flax] Candidate: ${result.source} -> ${result.url} -> ${player || 'unknown'}`);
+  });
+
+  const deferredStreams = candidates
+    .filter(shouldDeferResolution)
+    .map(buildDeferredStream);
+  const immediateCandidates = candidates
+    .filter((result) => !shouldDeferResolution(result))
+    .slice(0, EXTRACTOR_CANDIDATE_LIMIT);
+
+  if (candidates.length > immediateCandidates.length + deferredStreams.length) {
+    console.log(
+      `[Flax] Candidate cap: resolving ${immediateCandidates.length}/${candidates.length - deferredStreams.length} immediate candidates`
+    );
+  }
+
+  const settled = await Promise.allSettled(immediateCandidates.map((result) => resolveWithTimeout(result)));
+  const resolvedStreams = settled.flatMap((item) => {
+    if (item.status === 'fulfilled') {
+      return item.value;
+    }
+
+    return [];
+  });
+
+  const streams = deferredStreams.concat(resolvedStreams);
+  const unique = uniqueBy(streams, (stream) => `${stream.url}|${JSON.stringify(stream.headers || {})}`);
+
+  unique.sort((a, b) => {
+    const playerComparison = playerRank(b.player) - playerRank(a.player);
+    if (playerComparison !== 0) {
+      return playerComparison;
+    }
+
+    if (b.qualityRank !== a.qualityRank) {
+      return b.qualityRank - a.qualityRank;
+    }
+    return a.name.localeCompare(b.name);
+  });
+
+  const deferred = unique.filter((stream) => stream.deferredResolution);
+  const immediate = unique.filter((stream) => !stream.deferredResolution);
+  const output = SHOULD_VALIDATE_MEDIA
+    ? deferred.concat(await validatePlayableStreams(immediate))
+    : deferred.concat(immediate);
+
+  output.sort((a, b) => {
+    const playerComparison = playerRank(b.player) - playerRank(a.player);
+    if (playerComparison !== 0) {
+      return playerComparison;
+    }
+
+    if (b.qualityRank !== a.qualityRank) {
+      return b.qualityRank - a.qualityRank;
+    }
+    return a.name.localeCompare(b.name);
+  });
+
+  return output.map(({ qualityRank: _qualityRank, deferredResolution: _deferredResolution, ...stream }) => stream);
+}
+
+function prioritizeExtractorCandidates(results) {
+  return [...results].sort((left, right) => {
+    const playerComparison = playerRank(inferPlayerFromUrl(right.url)) - playerRank(inferPlayerFromUrl(left.url));
+    if (playerComparison !== 0) {
+      return playerComparison;
+    }
+
+    const sourceComparison = sourceRank(right.source) - sourceRank(left.source);
+    if (sourceComparison !== 0) {
+      return sourceComparison;
+    }
+
+    return String(left.url || '').localeCompare(String(right.url || ''));
+  });
+}
+
+function getExtractorTimeoutForResult(result) {
+  const label = String(result?.player || inferPlayerFromUrl(result?.url) || '').toLowerCase();
+  return getExtractorTimeoutMs(label);
+}
+
+function sourceRank(source) {
+  switch (source) {
+    case 'CuevanaAPI':
+      return 80;
+    case 'Cuevana':
+      return 70;
+    case 'Cinecalidad':
+      return 60;
+    case 'TioPlus':
+      return 50;
+    case 'GnulaHD':
+      return 20;
+    case 'HomeCine':
+      return 10;
+    case 'VerPeliculasUltra':
+      return 5;
+    default:
+      return 0;
+  }
+}
+
+async function resolveWithTimeout(result) {
+  let timeoutId;
+  const timeoutMs = getExtractorTimeoutForResult(result);
+  try {
+    return await Promise.race([
+      resolveOne(result),
+      new Promise(resolve => {
+        timeoutId = setTimeout(() => {
+          console.warn(`[Flax] Extractor timed out after ${timeoutMs}ms: ${result.url}`);
+          resolve([]);
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
+export async function resolveLatinoMediaflowTarget(targetUrl, headers = {}, options = {}) {
+  const player = options.player || inferPlayerFromUrl(targetUrl);
+  const result = {
+    source: options.source || 'MediaFlow',
+    language: options.language || 'Latino',
+    title: options.title || 'Latino Stream',
+    url: targetUrl,
+    referer: options.referer || headers.Referer || headers.referer || targetUrl,
+    headers,
+    player,
+  };
+
+  const streams = await resolveOne(result);
+  return streams[0] || null;
+}
+
+async function resolveOne(result) {
+  try {
+    const url = new URL(result.url, result.referer || 'https://example.com');
+    const host = url.hostname;
+
+    if (/\.(m3u8|mp4)(\?|$)/i.test(url.href)) {
+      return [buildStream(result, { url: url.href, player: inferPlayerFromUrl(url.href) })];
+    }
+
+    if (/supervideo/i.test(host)) {
+      console.log(`[Flax] SuperVideo skipped: ${result.url}`);
+      return [];
+    }
+
+    if (/dropload|dr0pstream/i.test(host)) {
+      console.log(`[Flax] Dropload skipped: ${result.url}`);
+      return [];
+    }
+
+    if (/vudeo/i.test(host)) {
+      console.log(`[Flax] Vudeo skipped: ${result.url}`);
+      return [];
+    }
+
+    if (/plustream/i.test(result.player || '')) {
+      console.log(`[Flax] Plustream skipped: ${result.url}`);
+      return [];
+    }
+
+    if (/streamwish|hlswish|bysejikuar/i.test(host) || /streamwish/i.test(result.player || '')) {
+      return resolveStreamwish(result, url);
+    }
+
+    if (/filemoon/i.test(host) || /filemoon/i.test(result.player || '')) {
+      return resolveFileMoon(result, url);
+    }
+
+    if (/voe|dianaavoidthey/i.test(host) || /voe/i.test(result.player || '')) {
+      return resolveVoe(result, url);
+    }
+
+    if (/mixdrop|mixdrp|mixdroop|m1xdrop/i.test(host)) {
+      return resolveMixdrop(result, url);
+    }
+
+    if (/filelions|vidhide/i.test(host)) {
+      return resolveFilelions(result, url);
+    }
+
+    if (/emturbovid|turbovidhls|turboviplay/i.test(host)) {
+      return resolveEmturbovid(result, url);
+    }
+
+    if (/player\.cuevana3\.eu/i.test(host)) {
+      return resolveCuevanaPlayer(result, url);
+    }
+
+    if (/doo\.lat/i.test(host) && /fakeplayer\.php/i.test(url.pathname)) {
+      return resolveCuevanaFakePlayer(result, url);
+    }
+
+    if (/dood|do[0-9]go|doood|dooood|ds2play|ds2video|dsvplay|d0o0d|do0od|d0000d|d000d|myvidplay|vidply|all3do|doply|vide0|vvide0|d-s/i.test(host)) {
+      return resolveDoodStream(result, url);
+    }
+
+    if (/streamtape|streamta\.pe|strtape|strcloud|stape\.fun/i.test(host)) {
+      return resolveStreamtape(result, url);
+    }
+
+    if (/fastream/i.test(host)) {
+      console.log(`[Flax] Fastream skipped: ${result.url}`);
+      return [];
+    }
+
+    if (/goodstream/i.test(host)) {
+      return resolveGoodstream(result, url);
+    }
+
+    if (/waaw|vidora/i.test(host)) {
+      console.log(`[Flax] Vidora skipped: ${result.url}`);
+      return [];
+    }
+
+    if (/strp2p|4meplayer|upns\.pro|p2pplay/i.test(host)) {
+      return resolveStrp2p(result, url);
+    }
+
+    if (/bullstream|mp4player|watch\.gxplayer/i.test(host)) {
+      return resolveStreamEmbed(result, url);
+    }
+
+    if (/vimeos/i.test(host)) {
+      return resolveVimeos(result, url);
+    }
+
+    if (/vidsrc|vsrc/i.test(host)) {
+      return resolveVidSrc(result, url);
+    }
+
+    console.log(`[Flax] Unsupported host: ${result.url}`);
+    return [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+function inferPlayerFromUrl(url) {
+  const value = String(url || '').toLowerCase();
+
+  if (value.includes('supervideo')) return 'SuperVideo';
+  if (value.includes('dropload') || value.includes('dr0pstream')) return 'Dropload';
+  if (value.includes('vudeo')) return 'Vudeo';
+  if (value.includes('streamwish') || value.includes('hlswish') || value.includes('bysejikuar')) return 'Streamwish';
+  if (value.includes('filemoon')) return 'FileMoon';
+  if (value.includes('voe')) return 'VOE';
+  if (value.includes('mixdrop') || value.includes('mixdrp') || value.includes('mixdroop') || value.includes('m1xdrop')) return 'Mixdrop';
+  if (value.includes('filelions') || value.includes('vidhide')) return 'FileLions';
+  if (value.includes('emturbovid') || value.includes('turbovidhls') || value.includes('turboviplay')) return 'Emturbovid';
+  if (value.includes('dood') || value.includes('ds2play') || value.includes('vidply') || value.includes('doply')) return 'DoodStream';
+  if (value.includes('streamtape') || value.includes('streamta.pe') || value.includes('strcloud')) return 'Streamtape';
+  if (value.includes('fastream')) return 'Fastream';
+  if (value.includes('goodstream')) return 'Goodstream';
+  if (value.includes('waaw') || value.includes('vidora')) return 'Vidora';
+  if (value.includes('strp2p') || value.includes('4meplayer') || value.includes('upns.pro') || value.includes('p2pplay')) return 'StrP2P';
+  if (value.includes('gxplayer') || value.includes('bullstream') || value.includes('mp4player')) return 'StreamEmbed';
+  if (value.includes('vimeos')) return 'Vimeos';
+  if (value.includes('vidsrc') || value.includes('vsrc')) return 'VidSrc';
+
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch (_error) {
+    return '';
+  }
+}
+
+function playerRank(player) {
+  switch (player) {
+    case 'Goodstream':
+      return 95;
+    case 'Vimeos':
+      return 92;
+    case 'FileLions':
+      return 90;
+    case 'Emturbovid':
+      return 85;
+    case 'Streamwish':
+      return 75;
+    case 'FileMoon':
+      return 72;
+    case 'DoodStream':
+      return 65;
+    case 'Dropload':
+      return 70;
+    case 'Fastream':
+      return 60;
+    case 'Mixdrop':
+      return 55;
+    case 'Vidora':
+      return 45;
+    case 'StrP2P':
+      return 40;
+    case 'StreamEmbed':
+      return 35;
+    case 'Streamtape':
+      return 20;
+    case 'VOE':
+      return 15;
+    case 'Vudeo':
+      return 5;
+    case 'VidSrc':
+      return 10;
+    default:
+      return 0;
+  }
+}
+
+function shouldProbePlayableStream(stream) {
+  return !!stream?.url;
+}
+
+async function validatePlayableStreams(streams) {
+  const validated = await Promise.all(streams.map(async (stream) => {
+    if (!shouldProbePlayableStream(stream)) {
+      return null;
+    }
+
+    const ok = await probePlaybackUrl(stream.url, stream.headers);
+    if (!ok) {
+      console.log(`[Flax] playback probe failed: ${stream.player} -> ${stream.url}`);
+      return null;
+    }
+
+    return stream;
+  }));
+
+  return validated.filter(Boolean);
+}
+
+async function probePlaybackUrl(url, headers = {}) {
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Range: 'bytes=0-0',
+        ...(headers || {}),
+      },
+    });
+
+    if (![200, 206].includes(response.status)) {
+      return false;
+    }
+
+    const contentType = String(response.headers?.get ? response.headers.get('content-type') : '').toLowerCase();
+    if (contentType.includes('text/html')) {
+      return false;
+    }
+
+    if (contentType.includes('mpegurl') || contentType.includes('video/') || contentType.includes('octet-stream')) {
+      return true;
+    }
+
+    return /\.(m3u8|mp4)(\?|$)/i.test(url) || /\/(master|playlist)\.(m3u8|txt)(\?|$)/i.test(url);
+  } catch (_error) {
+    return false;
+  }
+}
+
+function extractCookieHeader(rawSetCookie) {
+  if (!rawSetCookie) {
+    return '';
+  }
+
+  const parts = String(rawSetCookie).split(/,(?=[^;,=\s]+=[^;,]+)/);
+  const cookies = parts
+    .map((part) => part.trim().split(';')[0].trim())
+    .filter(Boolean);
+
+  return uniqueBy(cookies, (cookie) => cookie.split('=')[0]).join('; ');
+}
+
+function mergeCookieHeaders(...values) {
+  const cookies = values
+    .flatMap((value) => extractCookieHeader(value).split(/;\s*/))
+    .filter(Boolean);
+
+  return uniqueBy(cookies, (cookie) => cookie.split('=')[0]).join('; ');
+}
+
+async function validateDirectMedia(url, headers) {
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        ...(headers || {}),
+        Range: 'bytes=0-0',
+        Accept: '*/*',
+      },
+      redirect: 'manual',
+      signal: AbortSignal.timeout(8000),
+    });
+
+    return response.status === 200 || response.status === 206;
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function resolveMixdrop(result, url) {
+  const normalized = new URL(url.href.replace('/f/', '/e/'));
+  const fileUrl = new URL(normalized.href.replace('/e/', '/f/'));
+  const baseHeaders = {
+    ...(result.headers || {}),
+    Referer: result.referer || normalized.origin,
+  };
+  const embedPage = await fetchPage(normalized.href, {
+    headers: { ...baseHeaders, Referer: fileUrl.href },
+  }).catch(() => null);
+  const filePage = embedPage ? null : await fetchPage(fileUrl.href, { headers: baseHeaders }).catch(() => null);
+  const html = embedPage?.text || filePage?.text || null;
+  let finalPageUrl = embedPage?.url || filePage?.url || normalized.href;
+  let cookieHeader = mergeCookieHeaders(
+    result.headers?.Cookie,
+    result.headers?.cookie,
+    embedPage?.headers?.['set-cookie'],
+    filePage?.headers?.['set-cookie']
+  );
+
+  if (!html || /can't find the (file|video)/i.test(html)) {
+    console.log(`[Flax] Mixdrop miss: ${url.href}`);
+    return [];
+  }
+
+  let directValue = extractPackedUrl(html, [
+    /(?:MDCore|Core|MDp)\.wurl\s*=\s*"([^"]+)"/,
+    /(?:MDCore|Core|MDp)\.wurl\s*=\s*'([^']+)'/,
+    /wurl\s*=\s*"([^"]+)"/,
+    /wurl\s*=\s*'([^']+)'/,
+    /src:\s*"([^"]+)"/,
+    /src:\s*'([^']+)'/,
+    /(?:vsr|wurl)[^"'`]*["'`]((?:https?:)?\/\/[^"'`]+)["'`]/,
+  ]);
+
+  if ((!directValue || /^\/e\//.test(directValue)) && filePage?.text) {
+    const iframePath = extractPackedUrl(filePage.text, [
+      /<iframe[^>]+src="([^"]+)"/i,
+      /<iframe[^>]+src='([^']+)'/i,
+    ]);
+
+    if (iframePath) {
+      const iframeUrl = absoluteUrl(iframePath, fileUrl.origin);
+      const nestedPage = await fetchPage(iframeUrl, {
+        headers: { ...baseHeaders, Referer: fileUrl.href },
+      }).catch(() => null);
+      const nestedHtml = nestedPage?.text || null;
+
+      if (nestedHtml) {
+        finalPageUrl = nestedPage.url || finalPageUrl;
+        cookieHeader = mergeCookieHeaders(cookieHeader, nestedPage.headers?.['set-cookie']);
+        directValue = extractPackedUrl(nestedHtml, [
+          /(?:MDCore|Core|MDp)\.wurl\s*=\s*"([^"]+)"/,
+          /(?:MDCore|Core|MDp)\.wurl\s*=\s*'([^']+)'/,
+          /wurl\s*=\s*"([^"]+)"/,
+          /wurl\s*=\s*'([^']+)'/,
+          /src:\s*"([^"]+)"/,
+          /src:\s*'([^']+)'/,
+          /(?:vsr|wurl)[^"'`]*["'`]((?:https?:)?\/\/[^"'`]+)["'`]/,
+        ]);
+      }
+    }
+  }
+
+  if (!directValue || /^\/e\//.test(directValue)) {
+    console.log(`[Flax] Mixdrop parse miss: ${url.href}`);
+    return [];
+  }
+
+  const directUrl = absoluteUrl(directValue, normalized.origin);
+  const page = cheerio.load(filePage?.text || html);
+  const title = page('.title b').text().trim() || result.title;
+  const finalEmbedUrl = new URL(finalPageUrl);
+  const streamHeaders = buildPlaybackHeaders(finalEmbedUrl.href);
+
+  if (cookieHeader) {
+    streamHeaders.Cookie = cookieHeader;
+  }
+
+  const isPlayable = !SHOULD_VALIDATE_MEDIA || await validateDirectMedia(directUrl, streamHeaders);
+  if (!isPlayable) {
+    console.log(`[Flax] Mixdrop blocked: ${url.href}`);
+    return [];
+  }
+
+  return [buildStream(result, {
+    title,
+    url: directUrl,
+    quality: 'Auto',
+    headers: streamHeaders,
+    player: 'Mixdrop',
+  })];
+}
+
+async function resolveStreamwish(result, url) {
+  const embedUrl = new URL(url.href.replace('/f/', '/e/'));
+  const code = extractEmbedCode(embedUrl);
+  if (!code) {
+    console.log(`[Flax] Streamwish miss: ${url.href}`);
+    return [];
+  }
+
+  const requestHeaders = {
+    ...(result.headers || {}),
+    ...buildPlaybackHeaders(embedUrl.href),
+    Accept: 'application/json, text/plain, */*',
+  };
+  const detailsUrl = new URL(`/api/videos/${encodeURIComponent(code)}/embed/details`, embedUrl.origin);
+  const playbackUrl = new URL(`/api/videos/${encodeURIComponent(code)}/embed/playback`, embedUrl.origin);
+
+  const details = await fetchJson(detailsUrl.href, { headers: requestHeaders }).catch(() => null);
+  const playback = await fetchJson(playbackUrl.href, { headers: requestHeaders }).catch(() => null);
+  const media = await decryptStreamwishPayload(playback?.playback || playback).catch(() => null);
+  const sources = Array.isArray(media?.sources) ? media.sources : [];
+
+  if (sources.length === 0) {
+    console.log(`[Flax] Streamwish parse miss: ${url.href}`);
+    return [];
+  }
+
+  const bestSource = [...sources]
+    .filter((source) => source?.url)
+    .sort((left, right) => {
+      const leftHeight = parseInt(left.height || parseQuality(left.label).replace(/\D+/g, ''), 10) || 0;
+      const rightHeight = parseInt(right.height || parseQuality(right.label).replace(/\D+/g, ''), 10) || 0;
+      const leftBitrate = parseInt(left.bitrate_kbps, 10) || 0;
+      const rightBitrate = parseInt(right.bitrate_kbps, 10) || 0;
+
+      if (rightHeight !== leftHeight) {
+        return rightHeight - leftHeight;
+      }
+
+      return rightBitrate - leftBitrate;
+    })[0];
+
+  if (!bestSource?.url) {
+    console.log(`[Flax] Streamwish parse miss: ${url.href}`);
+    return [];
+  }
+
+  const streamHeaders = buildPlaybackHeaders(embedUrl.href);
+  const quality = bestSource.height
+    ? `${bestSource.height}p`
+    : parseQuality(bestSource.label || bestSource.url);
+
+  return [buildStream(result, {
+    title: details?.title || result.title,
+    url: absoluteUrl(bestSource.url, embedUrl.origin),
+    quality,
+    headers: streamHeaders,
+    player: 'Streamwish',
+  })];
+}
+
+async function resolveFileMoon(result, url, originalUrl = url) {
+  const normalized = new URL(url.href.replace('/e/', '/d/'));
+  const headers = {
+    ...(result.headers || {}),
+    Referer: result.referer || normalized.href,
+  };
+  const page = await fetchPage(normalized.href, { headers }).catch(() => null);
+  const html = page?.text || null;
+
+  if (!html || /Page not found/i.test(html)) {
+    console.log(`[Flax] FileMoon miss: ${url.href}`);
+    return [];
+  }
+
+  const iframeMatches = Array.from(html.matchAll(/<iframe[^>]+src=["']([^"']+)["']/gi));
+  if (iframeMatches.length) {
+    const iframeSrc = iframeMatches[iframeMatches.length - 1]?.[1];
+    if (iframeSrc) {
+      return resolveFileMoon(result, new URL(iframeSrc, page.url || normalized.href), originalUrl);
+    }
+  }
+
+  const unpacked = unpackPacker(html);
+  const playlistMatch =
+    unpacked.match(/sources\s*:\s*\[\s*\{\s*file\s*:\s*["']([^"']+\.m3u8[^"']*)/i) ||
+    unpacked.match(/file\s*:\s*["']([^"']+\.m3u8[^"']*)/i) ||
+    unpacked.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i);
+
+  if (!playlistMatch) {
+    console.log(`[Flax] FileMoon parse miss: ${url.href}`);
+    return [];
+  }
+
+  const finalPageUrl = page.url || normalized.href;
+  const title = cheerio.load(html)('h3').text().trim() || result.title;
+  const heightMatch = unpacked.match(/(\d{3,4})p/i);
+  const streamHeaders = buildPlaybackHeaders(originalUrl.href || finalPageUrl);
+
+  return [buildStream(result, {
+    title,
+    url: absoluteUrl(playlistMatch[1].replace(/\\\//g, '/'), finalPageUrl),
+    quality: heightMatch ? `${heightMatch[1]}p` : 'Auto',
+    headers: streamHeaders,
+    player: 'FileMoon',
+  })];
+}
+
+async function resolveVoe(result, url) {
+  const headers = {
+    ...(result.headers || {}),
+    Referer: result.referer || url.href,
+  };
+  let page = await fetchPage(url.href, { headers }).catch(() => null);
+  let html = page?.text || null;
+
+  if (!html) {
+    console.log(`[Flax] VOE miss: ${url.href}`);
+    return [];
+  }
+
+  let config = extractVoeConfig(html);
+  if (!config) {
+    const redirectUrl = extractVoeRedirect(html);
+    if (redirectUrl) {
+      page = await fetchPage(absoluteUrl(redirectUrl, url.origin), {
+        headers: buildPlaybackHeaders(absoluteUrl(redirectUrl, url.origin)),
+      }).catch(() => null);
+      html = page?.text || null;
+      config = html ? extractVoeConfig(html) : null;
+    }
+  }
+
+  const finalPageUrl = page.url || url.href;
+  const streamHeaders = buildPlaybackHeaders(finalPageUrl);
+  const playlistUrl = config?.source || null;
+  const directUrl = config?.direct_access_allowed !== false ? config?.direct_access_url : null;
+  const streamUrl = playlistUrl || directUrl;
+
+  if (!streamUrl) {
+    console.log(`[Flax] VOE parse miss: ${url.href}`);
+    return [];
+  }
+
+  return [buildStream(result, {
+    title: config?.title || result.title,
+    url: absoluteUrl(streamUrl, finalPageUrl),
+    quality: 'Auto',
+    headers: streamHeaders,
+    player: 'VOE',
+  })];
+}
+
+async function resolveFilelions(result, url) {
+  const normalized = new URL(
+    url.href
+      .replace('/v/', '/f/')
+      .replace('/download/', '/f/')
+      .replace('/file/', '/f/')
+  );
+  const headers = {
+    ...(result.headers || {}),
+    Referer: result.referer || 'https://ww1.cuevana3.is/',
+  };
+  const page = await fetchPage(normalized.href, { headers }).catch(() => null);
+  if (!page?.text) {
+    console.log(`[Flax] FileLions miss: ${url.href}`);
+    return [];
+  }
+
+  const unpacked = unpackPacker(page.text);
+  const hls4Match = unpacked.match(/["']hls4["']\s*:\s*["']([^"']+)/i);
+  const hls3Match = unpacked.match(/["']hls3["']\s*:\s*["']([^"']+)/i);
+  const hls2Match =
+    unpacked.match(/var\s+links\s*=\s*\{[^}]*["']hls2["']\s*:\s*["']([^"']+)/i) ||
+    unpacked.match(/["']hls2["']\s*:\s*["']([^"']+)/i);
+  const fileMatch =
+    unpacked.match(/file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/i) ||
+    unpacked.match(/sources\s*:\s*\[\{\s*file\s*:\s*["']([^"']+)/i);
+  const playlistCandidate = hls4Match?.[1] || hls3Match?.[1] || hls2Match?.[1] || fileMatch?.[1];
+
+  if (!playlistCandidate) {
+    console.log(`[Flax] FileLions parse miss: ${url.href}`);
+    return [];
+  }
+
+  const finalPageUrl = page.url || normalized.href;
+  const playlistUrl = absoluteUrl(playlistCandidate.replace(/\\\//g, '/'), finalPageUrl);
+  const title = cheerio.load(unpacked)('meta[name="description"]').attr('content') || result.title;
+  const streamHeaders = buildPlaybackHeaders(finalPageUrl);
+
+  return [buildStream(result, {
+    title,
+    url: playlistUrl,
+    quality: 'Auto',
+    headers: streamHeaders,
+    player: 'FileLions',
+  })];
+}
+
+async function resolveEmturbovid(result, url) {
+  const headers = {
+    ...(result.headers || {}),
+    Referer: result.referer || 'https://tioplus.app/',
+  };
+  const page = await fetchPage(url.href, { headers }).catch(() => null);
+  const html = page?.text;
+  if (!html) {
+    console.log(`[Flax] Emturbovid miss: ${url.href}`);
+    return [];
+  }
+
+  const playlistMatch =
+    html.match(/data-hash="([^"]+\.m3u8[^"]*)"/i) ||
+    html.match(/["'](https?:\/\/[^"']+\.m3u8[^"']*)["']/i);
+
+  if (!playlistMatch) {
+    console.log(`[Flax] Emturbovid parse miss: ${url.href}`);
+    return [];
+  }
+
+  const playlistUrl = playlistMatch[1].replace(/\\\//g, '/');
+  const title = cheerio.load(html)('title').text().trim() || result.title;
+  const streamHeaders = buildPlaybackHeaders(page.url || url.href);
+
+  return [buildStream(result, {
+    title,
+    url: playlistUrl,
+    quality: 'Auto',
+    headers: streamHeaders,
+    player: 'Emturbovid',
+  })];
+}
+
+async function resolveCuevanaPlayer(result, url) {
+  const html = await fetchText(url.href, {
+    headers: {
+      ...(result.headers || {}),
+      Referer: result.referer || 'https://ww1.cuevana3.is/',
+    },
+  }).catch(() => null);
+
+  if (!html) {
+    console.log(`[Flax] Cuevana player miss: ${url.href}`);
+    return [];
+  }
+
+  const targetMatch =
+    html.match(/var\s+url\s*=\s*'([^']+)'/i) ||
+    html.match(/var\s+url\s*=\s*"([^"]+)"/i) ||
+    html.match(/<iframe[^>]+src="([^"]+)"/i) ||
+    html.match(/<iframe[^>]+src='([^']+)'/i);
+
+  if (!targetMatch) {
+    console.log(`[Flax] Cuevana player parse miss: ${url.href}`);
+    return [];
+  }
+
+  return resolveOne({
+    ...result,
+    url: absoluteUrl(targetMatch[1], url.origin),
+    referer: url.href,
+    headers: { Referer: url.href },
+    preserveTitle: true,
+  });
+}
+
+async function resolveCuevanaFakePlayer(result, url) {
+  const html = await fetchText(url.href, {
+    headers: {
+      ...(result.headers || {}),
+      Referer: result.referer || 'https://cue.cuevana3.nu/',
+    },
+  }).catch(() => null);
+
+  if (!html) {
+    console.log(`[Flax] Cuevana fakeplayer miss: ${url.href}`);
+    return [];
+  }
+
+  const targetMatch =
+    html.match(/var\s+url\s*=\s*'([^']+)'/i) ||
+    html.match(/var\s+url\s*=\s*"([^"]+)"/i) ||
+    html.match(/window\.location\.href\s*=\s*['"]([^'"]+)['"]/i);
+
+  if (!targetMatch?.[1]) {
+    console.log(`[Flax] Cuevana fakeplayer parse miss: ${url.href}`);
+    return [];
+  }
+
+  return resolveOne({
+    ...result,
+    url: absoluteUrl(targetMatch[1], url.origin),
+    referer: url.href,
+    headers: { Referer: url.href },
+    preserveTitle: true,
+  });
+}
+
+async function resolveStrp2p(result, url) {
+  if (!url.hash || url.hash.length < 2) {
+    console.log(`[Flax] StrP2P miss: ${url.href}`);
+    return [];
+  }
+
+  const apiUrl = new URL(`/api/v1/video?id=${encodeURIComponent(url.hash.slice(1))}`, url.origin);
+  const headers = {
+    Origin: url.origin,
+    Referer: `${url.origin}/`,
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36',
+  };
+
+  const hexData = await fetchText(apiUrl.href, { headers }).catch(() => null);
+  if (!hexData) {
+    console.log(`[Flax] StrP2P miss: ${url.href}`);
+    return [];
+  }
+
+  try {
+    const encrypted = CryptoJS.enc.Hex.parse(hexData.trim().slice(0, -1));
+    const key = CryptoJS.enc.Hex.parse('6b69656d7469656e6d75613931316361');
+    const iv = CryptoJS.enc.Hex.parse('313233343536373839306f6975797472');
+    const decrypted = CryptoJS.AES.decrypt(
+      { ciphertext: encrypted },
+      key,
+      { iv, mode: CryptoJS.mode.CBC, padding: CryptoJS.pad.Pkcs7 }
+    ).toString(CryptoJS.enc.Utf8);
+    const { source, title } = JSON.parse(decrypted);
+
+    if (!source) {
+      console.log(`[Flax] StrP2P parse miss: ${url.href}`);
+      return [];
+    }
+
+    const playlistUrl = new URL(source, url.origin);
+    const height = await guessHeightFromPlaylist(playlistUrl.href, headers).catch(() => null);
+
+    return [
+      buildStream(result, {
+        url: playlistUrl.href,
+        title,
+        quality: height ? `${height}p` : 'Auto',
+        player: 'StrP2P',
+        headers,
+      }),
+    ];
+  } catch (_error) {
+    console.log(`[Flax] StrP2P parse miss: ${url.href}`);
+    return [];
+  }
+}
+
+async function resolveDoodStream(result, url) {
+  const videoId = url.pathname.replace(/\/+$/, '').split('/').pop();
+  if (!videoId) {
+    return [];
+  }
+
+  const normalized = new URL(`https://dood.to/e/${videoId}`);
+  const headers = {
+    ...(result.headers || {}),
+    Referer: `${normalized.origin}/`,
+    Origin: normalized.origin,
+  };
+  const html = await fetchText(normalized.href, { headers }).catch(() => null);
+
+  if (!html || /Video not found/i.test(html)) {
+    console.log(`[Flax] Dood miss: ${url.href}`);
+    return [];
+  }
+
+  const titlePage = cheerio.load(html);
+  const title = titlePage('title').text().trim().replace(/ - DoodStream$/i, '').trim() || result.title;
+
+  const passMatch =
+    html.match(/\$\.get\(\s*['"]([^'"]*\/pass_md5\/[^'"]+)['"]\s*,/i) ||
+    html.match(/(\/pass_md5\/[^'"\\\s]+)/);
+  if (!passMatch) {
+    console.log(`[Flax] Dood pass_md5 miss: ${normalized.href}`);
+    return [];
+  }
+
+  const passUrl = new URL(passMatch[1], normalized.origin).href;
+  const passToken = passUrl.split('/').filter(Boolean).pop();
+  const tokenMatch = html.match(/token=([^&'"]+)/);
+  const token = tokenMatch?.[1] || passToken;
+  const passResponse = await fetchText(passUrl, {
+    headers: {
+      Referer: normalized.href,
+      'User-Agent': (result.headers || {})['User-Agent'],
+    },
+  }).catch(() => null);
+
+  if (!passResponse) {
+    console.log(`[Flax] Dood pass_md5 fetch miss: ${normalized.href}`);
+    return [];
+  }
+
+  const directBase = passResponse.trim();
+  const suffix = Math.random().toString(36).slice(2, 12);
+  const directUrl = new URL(`${directBase}${suffix}`);
+  if (token) {
+    directUrl.searchParams.set('token', token);
+  }
+  directUrl.searchParams.set('expiry', String(Date.now()));
+  const streamHeaders = { Referer: normalized.href };
+  const isPlayable = !SHOULD_VALIDATE_MEDIA || await validateDirectMedia(directUrl.href, streamHeaders);
+  if (!isPlayable) {
+    console.log(`[Flax] Dood blocked: ${normalized.href}`);
+    return [];
+  }
+
+  return [buildStream(result, {
+    title,
+    url: directUrl.href,
+    quality: 'Auto',
+    headers: streamHeaders,
+    player: 'DoodStream',
+  })];
+}
+
+async function resolveDropload(result, url) {
+  const normalized = url.href
+    .replace('/d/', '/')
+    .replace('/e/', '/')
+    .replace('/embed-', '/');
+  const html = await fetchText(normalized, { headers: result.headers }).catch(() => null);
+
+  if (!html) {
+    console.log(`[Flax] Dropload miss: ${url.href}`);
+    return [];
+  }
+
+  if (/File Not Found|Pending in queue|no longer available|expired or has been deleted/i.test(html)) {
+    console.log(`[Flax] Dropload miss: ${url.href}`);
+    return [];
+  }
+
+  const unpacked = unpackPacker(html);
+  const fileMatch =
+    unpacked.match(/sources\s*:\s*\[\{\s*file\s*:\s*["']([^"']+)/i) ||
+    html.match(/sources\s*:\s*\[\{\s*file\s*:\s*["']([^"']+)/i) ||
+    unpacked.match(/file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/i) ||
+    html.match(/file\s*:\s*["'](https?:\/\/[^"']+\.m3u8[^"']*)/i);
+  if (!fileMatch) {
+    console.log(`[Flax] Dropload parse miss: ${url.href}`);
+    return [];
+  }
+
+  const hostMatch = html.match(/(https:\/\/.+?\/)player/);
+  const page = cheerio.load(html);
+  const title = page('.videoplayer h1').text().trim() || result.title;
+  const playlistHeaders = hostMatch ? { Referer: hostMatch[1] } : (result.headers || {});
+  const height = await guessHeightFromPlaylist(fileMatch[1], playlistHeaders);
+
+  return [buildStream(result, {
+    title,
+    url: fileMatch[1],
+    quality: height ? `${height}p` : 'Auto',
+    headers: playlistHeaders,
+    player: 'Dropload',
+  })];
+}
+
+async function resolveStreamtape(result, url) {
+  const candidates = uniqueBy([
+    url.href,
+    url.href.replace('/e/', '/v/'),
+    url.href.replace('/v/', '/e/'),
+  ], (value) => value);
+
+  let html = null;
+  let finalUrl = null;
+
+  for (const candidate of candidates) {
+    const page = await fetchText(candidate, { headers: result.headers }).catch(() => null);
+    if (!page) {
+      continue;
+    }
+    if (/Video not found|Maybe it got deleted by the creator/i.test(page)) {
+      continue;
+    }
+    html = page;
+    finalUrl = candidate;
+    break;
+  }
+
+  if (!html) {
+    console.log(`[Flax] Streamtape miss: ${url.href}`);
+    return [];
+  }
+
+  const directMatch = html.match(/'(\/\/streamtape\.com\/get_video[^']+)'/) || html.match(/"(\/\/streamtape\.com\/get_video[^"]+)"/);
+
+  if (!directMatch) {
+    console.log(`[Flax] Streamtape miss: ${url.href}`);
+    return [];
+  }
+
+  const page = cheerio.load(html);
+  const title = page('meta[name="og:title"]').attr('content') || result.title;
+
+  return [buildStream(result, {
+    title,
+    url: `https:${directMatch[1]}`,
+    quality: '720p',
+    headers: finalUrl ? { Referer: finalUrl } : undefined,
+    player: 'Streamtape',
+  })];
+}
+
+async function resolveFastream(result, url) {
+  const candidates = [
+    url.href,
+    url.href.replace('/e/', '/embed-').replace('/d/', '/embed-'),
+    url.href.replace('/embed-', '/d/'),
+  ];
+
+  for (const candidate of candidates) {
+    const html = await fetchText(candidate, { headers: result.headers }).catch(() => null);
+    if (!html) {
+      continue;
+    }
+
+    const unpacked = unpackPacker(html);
+    const fileMatch = unpacked.match(/sources:\[\{file:"(.*?)"/) || unpacked.match(/file:\s*"(https?:\/\/[^"]+\.m3u8[^"]*)"/);
+    if (!fileMatch) {
+      continue;
+    }
+
+    const titleMatch = html.match(/>Download (.*?)</);
+    const headers = { Referer: candidate };
+    const height = await guessHeightFromPlaylist(fileMatch[1], headers);
+
+    return [buildStream(result, {
+      title: titleMatch ? titleMatch[1] : result.title,
+      url: fileMatch[1],
+      quality: height ? `${height}p` : 'Auto',
+      headers,
+      player: 'Fastream',
+    })];
+  }
+
+  console.log(`[Flax] Fastream miss: ${url.href}`);
+  return [];
+}
+
+async function resolveVidora(result, url) {
+  const candidates = uniqueBy([
+    url.href.replace('/embed/', '/').replace('/f/', '/e/'),
+    url.href.replace('/embed/', '/'),
+    url.href,
+  ], (value) => value);
+
+  let html = null;
+  let finalUrl = null;
+
+  for (const candidate of candidates) {
+    const page = await fetchText(candidate, { headers: result.headers }).catch(() => null);
+    if (!page) {
+      continue;
+    }
+    html = page;
+    finalUrl = candidate;
+    break;
+  }
+
+  if (!html || !finalUrl) {
+    console.log(`[Flax] Vidora miss: ${url.href}`);
+    return [];
+  }
+
+  const unpacked = unpackPacker(html);
+  const fileMatch =
+    unpacked.match(/file:\s*"(.*?)"/) ||
+    unpacked.match(/file:\s*'(.*?)'/) ||
+    html.match(/src:\s*['"](https?:\/\/[^'"]+\.m3u8[^'"]*)/i);
+  if (!fileMatch) {
+    console.log(`[Flax] Vidora miss: ${url.href}`);
+    return [];
+  }
+
+  const page = cheerio.load(html);
+  const title = page('title').text().trim().replace(/^Watch /, '') || result.title;
+  const streamHeaders = buildPlaybackHeaders(finalUrl);
+  const height = await guessHeightFromPlaylist(fileMatch[1], streamHeaders);
+
+  return [buildStream(result, {
+    title,
+    url: fileMatch[1],
+    quality: height ? `${height}p` : 'Auto',
+    headers: streamHeaders,
+    player: 'Vidora',
+  })];
+}
+
+async function resolveStreamEmbed(result, url) {
+  const html = await fetchText(url.href, { headers: result.headers });
+  if (/Video is not ready/i.test(html)) {
+    console.log(`[Flax] StreamEmbed not ready: ${url.href}`);
+    return [];
+  }
+
+  const videoMatch = html.match(/video ?= ?(.*);/);
+  if (!videoMatch) {
+    console.log(`[Flax] StreamEmbed parse miss: ${url.href}`);
+    return [];
+  }
+
+  const video = JSON.parse(videoMatch[1]);
+  const playlistUrl = new URL(`/m3u8/${video.uid}/${video.md5}/master.txt?s=1&id=${video.id}&cache=${video.status}`, url.origin).href;
+  const qualityList = JSON.parse(video.quality || '[]');
+
+  return [buildStream(result, {
+    title: decodeURIComponent(video.title || result.title),
+    url: playlistUrl,
+    quality: qualityList[0] ? `${qualityList[0]}p` : 'Auto',
+    player: 'StreamEmbed',
+  })];
+}
+
+async function resolveGoodstream(result, url) {
+  const pageUrl = url.href;
+  const page = await fetchPage(pageUrl, { headers: result.headers }).catch(() => null);
+  if (!page?.text) {
+    console.log(`[Flax] Goodstream miss: ${pageUrl}`);
+    return [];
+  }
+
+  const html = page.text;
+
+  if (/expired|deleted|file is no longer available/i.test(html)) {
+    console.log(`[Flax] Goodstream dead link: ${pageUrl}`);
+    return [];
+  }
+
+  const fileMatch =
+    html.match(/sources:\s*\[\s*\{\s*file:"([^"]+\.m3u8[^"]*)"/i) ||
+    html.match(/sources:\s*\[\s*\{\s*file:'([^']+\.m3u8[^']*)'/i) ||
+    html.match(/file:"([^"]+\.m3u8[^"]*)"/i) ||
+    html.match(/file:'([^']+\.m3u8[^']*)'/i);
+
+  if (!fileMatch) {
+    console.log(`[Flax] Goodstream parse miss: ${pageUrl}`);
+    return [];
+  }
+
+  const playlistUrl = fileMatch[1].replace(/\\\//g, '/');
+  const cookieHeader = extractInlineCookieHeader(html);
+  const streamHeaders = buildPlaybackHeaders(pageUrl, {
+    ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    Accept: '*/*',
+    'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+    'sec-ch-ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
+  });
+  const viewMatch = html.match(/\/dl\?op=view&view_id=(\d+)&hash=([a-z0-9-]+)/i);
+  if (viewMatch) {
+    const beaconUrl = new URL(`/dl?op=view&view_id=${viewMatch[1]}&hash=${viewMatch[2]}&adb=0`, url.origin).href;
+    await fetchText(beaconUrl, { headers: streamHeaders }).catch(() => null);
+  }
+  const height = await guessHeightFromPlaylist(playlistUrl, streamHeaders).catch(() => null);
+
+  return [buildStream(result, {
+    url: playlistUrl,
+    quality: height ? `${height}p` : 'Auto',
+    headers: streamHeaders,
+    player: 'Goodstream',
+  })];
+}
+
+async function resolveVimeos(result, url) {
+  const headers = {
+    ...(result.headers || {}),
+    Referer: result.referer || url.href,
+  };
+  const html = await fetchText(url.href, { headers }).catch(() => null);
+  if (!html) {
+    console.log(`[Flax] Vimeos miss: ${url.href}`);
+    return [];
+  }
+
+  const unpacked = unpackPacker(html) || '';
+  const body = `${html}\n${unpacked}`;
+  const fileMatch =
+    body.match(/sources:\s*\[\{file:"([^"]+\.m3u8[^"]*)"/i) ||
+    body.match(/sources:\s*\[\{file:'([^']+\.m3u8[^']*)'/i) ||
+    body.match(/https?:\/\/[^"'`\s]+\.m3u8[^"'`\s]*/i);
+
+  if (!fileMatch) {
+    console.log(`[Flax] Vimeos parse miss: ${url.href}`);
+    return [];
+  }
+
+  const playlistUrl = (fileMatch[1] || fileMatch[0]).replace(/\\\//g, '/');
+  const posterMatch = body.match(/image:"([^"]+)"/i);
+  const streamHeaders = buildPlaybackHeaders(url.href, {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    Accept: '*/*',
+    'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+    'sec-ch-ua': '"Chromium";v="122", "Not(A:Brand";v="24", "Google Chrome";v="122"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
+  });
+  const viewMatch = body.match(/\/dl\?op=view&view_id=(\d+)&hash=([a-z0-9-]+)/i);
+  if (viewMatch) {
+    const beaconUrl = new URL(`/dl?op=view&view_id=${viewMatch[1]}&hash=${viewMatch[2]}&adb=0`, url.origin).href;
+    await fetchText(beaconUrl, { headers: streamHeaders }).catch(() => null);
+  }
+  const height = await guessHeightFromPlaylist(playlistUrl, streamHeaders).catch(() => null);
+
+  return [buildStream(result, {
+    title: posterMatch ? result.title : result.title,
+    url: playlistUrl,
+    quality: height ? `${height}p` : 'Auto',
+    headers: streamHeaders,
+    player: 'Vimeos',
+  })];
+}
+
+async function resolveVidSrc(result, url) {
+  const html = await fetchText(url.href, { headers: result.headers });
+  const tokenMatch = html.match(/['"]token['"]: ?['"](.*?)['"]/);
+  const expiresMatch = html.match(/['"]expires['"]: ?['"](.*?)['"]/);
+  const urlMatch = html.match(/url: ?['"](.*?)['"]/);
+
+  if (!tokenMatch || !expiresMatch || !urlMatch) {
+    console.log(`[Flax] VidSrc parse miss: ${url.href}`);
+    return [];
+  }
+
+  const baseUrl = new URL(urlMatch[1]);
+  const playlistUrl = new URL(`${baseUrl.origin}${baseUrl.pathname}.m3u8?${baseUrl.searchParams}`);
+  playlistUrl.searchParams.append('token', tokenMatch[1]);
+  playlistUrl.searchParams.append('expires', expiresMatch[1]);
+  playlistUrl.searchParams.append('h', '1');
+
+  const height = await guessHeightFromPlaylist(playlistUrl.href, { Referer: url.href });
+
+  return [buildStream(result, {
+    url: playlistUrl.href,
+    quality: height ? `${height}p` : 'Auto',
+    headers: { Referer: url.href },
+    player: 'VidSrc',
+  })];
+}
