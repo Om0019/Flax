@@ -1,0 +1,20 @@
+{
+  "id": "showbox",
+  "name": "ShowBox",
+  "description": "ShowBox streaming with multiple quality options and versions",
+  "version": "1.0.0",
+  "author": "Nuvio Team",
+  "supportedTypes": [
+    "movie",
+    "tv"
+  ],
+  "enabled": true,
+  "formats": [
+    "mp4",
+    "mkv"
+  ],
+  "logo": "https://raw.githubusercontent.com/tapframe/nuvio-providers/main/Assets/Logo-2.png",
+  "contentLanguage": [
+    "en"
+  ]
+}

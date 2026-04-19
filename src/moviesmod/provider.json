@@ -1,0 +1,19 @@
+{
+  "id": "moviesmod",
+  "name": "MoviesMod",
+  "description": "Movie and TV show streams from MoviesMod with multiple quality options",
+  "version": "1.0.1",
+  "author": "Nuvio Team",
+  "supportedTypes": [
+    "movie",
+    "tv"
+  ],
+  "enabled": true,
+  "formats": [
+    "mkv"
+  ],
+  "logo": "https://www.google.com/s2/favicons?domain=moviesmod.day&sz=128",
+  "contentLanguage": [
+    "en"
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "id": "4khdhub",
+  "name": "4KHDHub",
+  "description": "4KHDHub direct links",
+  "version": "1.0.2",
+  "author": "Nuvio Team",
+  "supportedTypes": [
+    "movie",
+    "tv"
+  ],
+  "enabled": true,
+  "formats": [
+    "mkv"
+  ],
+  "logo": "https://www.google.com/s2/favicons?domain=4khdhub.fans&sz=128",
+  "contentLanguage": [
+    "en"
+  ]
+}

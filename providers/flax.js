@@ -1,6 +1,6 @@
 /**
  * flax - Built from src/flax/
- * Generated: 2026-04-18T23:41:48.434Z
+ * Generated: 2026-04-19T00:17:51.777Z
  */
 var __create = Object.create;
 var __defProp = Object.defineProperty;

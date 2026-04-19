@@ -1,0 +1,16 @@
+{
+  "id": "vixsrc",
+  "name": "Vixsrc",
+  "description": "Vixsrc M3U8 streaming with auto quality selection",
+  "version": "1.0.0",
+  "author": "Nuvio Team",
+  "supportedTypes": [
+    "movie",
+    "tv"
+  ],
+  "enabled": true,
+  "logo": "https://vixsrc.to/favicon.ico",
+  "contentLanguage": [
+    "en"
+  ]
+}

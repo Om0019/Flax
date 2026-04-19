@@ -1,0 +1,19 @@
+{
+  "id": "uhdmovies",
+  "name": "UHDMovies",
+  "description": "UHD Movies streaming with multiple resolution",
+  "version": "1.2.0",
+  "author": "Nuvio Team",
+  "supportedTypes": [
+    "movie",
+    "tv"
+  ],
+  "enabled": true,
+  "formats": [
+    "mkv"
+  ],
+  "logo": "https://www.google.com/s2/favicons?domain=uhdmovies.ink&sz=128",
+  "contentLanguage": [
+    "en"
+  ]
+}
